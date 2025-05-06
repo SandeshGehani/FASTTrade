@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FASTTrade - Listing</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/listing.css">
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- AOS for scroll animations -->
+    <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
+    <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
+    <script>
+    if (!localStorage.getItem('access_token')) {
+        window.location.href = 'login.html?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+    }
+    </script>
+</head>
+<body>
+    <div x-data="{ mobileMenuOpen: false, profileDropdownOpen: false, detailsModalOpen: false, selectedItem: null, loggedIn: !!localStorage.getItem('access_token') }">
+        <!-- Navigation Bar -->
+        <nav class="navbar">
+            <div class="navbar-container">
+                <div class="navbar-logo">
+                    <a href="index.html">
+                        <svg width="150" height="30" viewBox="0 0 500 200" xmlns="http://www.w3.org/2000/svg" class="logo-svg">
+                            <text x="140" y="165" font-family="Arial" font-size="108" font-weight="bold">
+                                <tspan fill="#F9F9F9">FAST</tspan><tspan fill="#CEC0FF">Trade</tspan><tspan fill="#F9F9F9">.</tspan>
+                            </text>
+                        </svg>
+                    </a>
+                </div>
+                
+                <!-- Mobile menu button -->
+                <button class="mobile-menu-button" @click="mobileMenuOpen = !mobileMenuOpen">
+                    <i class="fas fa-bars"></i>
+                </button>
+                
+                <!-- Desktop Navigation -->
+                <div class="navbar-links desktop-nav">
+                    <a href="index.html" class="nav-link">Home</a>
+                    <a href="listing.html" class="nav-link active">Listing</a>
+                    <a href="about.html" class="nav-link">About</a>
+                    <template x-if="loggedIn">
+                        <a href="profile.html" class="nav-link">Profile</a>
+                    </template>
+                </div>
+                
+                <!-- Search Bar -->
+                <div class="search-container desktop-search" x-data="{ search: '', results: [], typingTimeout: null, fetchResults() { clearTimeout(this.typingTimeout); this.typingTimeout = setTimeout(async () => { const res = await fetch(`/api/listings?search=${encodeURIComponent(this.search)}`); const data = await res.json(); this.results = data.listings; window.updateListings && window.updateListings(this.results); }, 300); } }">
+                    <div class="search-input-wrapper">
+                        <input type="text" placeholder="Search for items..." class="search-input" x-model="search" @input="fetchResults">
+                        <button class="search-button">
+                            <i class="fas fa-search"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Profile Section -->
+                <div class="profile-section desktop-profile" x-data="{ loggedIn: !!localStorage.getItem('access_token'), profileDropdownOpen: false }">
+                    <template x-if="loggedIn">
+                        <div>
+                            <div class="profile-img-container" @click="profileDropdownOpen = !profileDropdownOpen">
+                                <img :src="localStorage.getItem('profile_image') || 'https://via.placeholder.com/40'" alt="Profile" class="profile-img">
+                            </div>
+                            <!-- Profile Dropdown -->
+                            <div x-show="profileDropdownOpen" @click.away="profileDropdownOpen = false" class="profile-dropdown">
+                                <a href="profile.html" class="dropdown-item">My Profile</a>
+                                <a href="messages.html" class="dropdown-item">Messages</a>
+                                <template x-if="localStorage.getItem('user_email') === 'k232004@nu.edu.pk'">
+                                    <a href="admin.html" class="dropdown-item">
+                                        <i class="fas fa-shield-alt"></i> Admin Panel
+                                    </a>
+                                </template>
+                                <a href="#" class="dropdown-item" @click="localStorage.clear(); window.location.href='index.html'">Logout</a>
+                            </div>
+                        </div>
+                    </template>
+                    <template x-if="!loggedIn">
+                        <button class="btn btn-primary" @click="window.location.href='login.html'">Join</button>
+                    </template>
+                </div>
+            </div>
+            
+            <!-- Mobile Menu -->
+            <div x-show="mobileMenuOpen" @click.away="mobileMenuOpen = false" class="mobile-menu">
+                <div class="search-container mobile-search">
+                    <div class="search-input-wrapper">
+                        <input type="text" placeholder="Search for items..." class="search-input">
+                        <button class="search-button">
+                            <i class="fas fa-search"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="navbar-links mobile-nav">
+                    <a href="index.html" class="nav-link">Home</a>
+                    <a href="listing.html" class="nav-link active">Listing</a>
+                    <a href="about.html" class="nav-link">About</a>
+                    <template x-if="loggedIn">
+                        <a href="profile.html" class="nav-link">Profile</a>
+                        <a href="#" class="nav-link" @click="localStorage.clear(); window.location.reload();">Logout</a>
+                    </template>
+                    <template x-if="!loggedIn">
+                        <a href="#" class="nav-link" @click="window.location.href='login.html'">Join</a>
+                    </template>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content" x-data="marketplaceData()" x-init="init()">
+            <div class="marketplace-container">
+                <!-- Listings Section -->
+                <section class="listings-section">
+                    <div class="listings-header">
+                        <h2>Listings</h2>
+                        <div class="listings-actions">
+                            <!-- <div class="sort-dropdown">
+                                <select x-model="sortOption" @change="sortListings">
+                                    <option value="newest">Newest Listings</option>
+                                    <option value="relevance">Relevance</option>
+                                    <option value="price_low">Price: Low to High</option>
+                                    <option value="price_high">Price: High to Low</option>
+                                </select>
+                            </div> -->
+                            <button class="btn btn-primary add-listing-btn" @click="handleAddListingClick">
+                                <i class="fas fa-plus"></i> Add Listing
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="listings-grid" x-data="{ listings: [], loading: true, async fetchListings() { this.loading = true; const res = await fetch('/api/listings'); const data = await res.json(); this.listings = data.listings; this.loading = false; }, init() { this.fetchListings(); window.updateListings = (results) => { this.listings = results; }; } }" x-init="init()">
+                        <template x-for="(item, index) in listings" :key="item.id">
+                            <div class="listing-card">
+                                <div class="listing-image">
+                                    <img :src="item.image" :alt="item.title" onerror="this.onerror=null;this.src='https://via.placeholder.com/300x200?text=No+Image';">
+                                    <span class="listing-condition" x-text="'Condition: ' + item.condition + '/10'"></span>
+                                </div>
+                                <div class="listing-content">
+                                    <h3 class="listing-title" x-text="item.title"></h3>
+                                    <p class="listing-price" x-text="'Rs. ' + item.price"></p>
+                                    <p class="listing-seller">
+                                        <i class="fas fa-user"></i> <span x-text="item.seller_id"></span>
+                                    </p>
+                                    <div class="listing-actions">
+                                        <button class="btn btn-secondary btn-sm" @click="messageSeller(item)">
+                                            <i class="fas fa-comment"></i> Message
+                                        </button>
+                                        <button class="btn btn-primary btn-sm" @click="goToDetails(item)">
+                                            <i class="fas fa-info-circle"></i> Details
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                        <!-- Loading State -->
+                        <div class="empty-state" x-show="loading">
+                            <i class="fas fa-spinner fa-spin empty-icon"></i>
+                            <h3>Loading listings...</h3>
+                        </div>
+                    </div>
+                    
+                    <!-- Empty State -->
+                    <div class="empty-state" x-show="!loading && listings.length === 0">
+                        <i class="fas fa-search empty-icon"></i>
+                        <h3>No listings found</h3>
+                        <p>Try adjusting your search criteria</p>
+                    </div>
+                    
+                    <!-- Pagination -->
+                    <div class="pagination" x-show="listings.length > 0">
+                        <button class="pagination-btn" :disabled="currentPage === 1" @click="prevPage">
+                            <i class="fas fa-chevron-left"></i> Previous
+                        </button>
+                        <div class="pagination-info">
+                            Page <span x-text="currentPage"></span> of <span x-text="totalPages"></span>
+                        </div>
+                        <button class="pagination-btn" :disabled="currentPage === totalPages" @click="nextPage">
+                            Next <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
+                </section>
+            </div>
+            
+            <!-- Item Details Modal -->
+            <div class="modal" x-show="detailsModalOpen" @click.self="detailsModalOpen = false">
+                <div class="modal-content" x-show="selectedItem">
+                    <span class="close-modal" @click="detailsModalOpen = false">&times;</span>
+                    <div class="modal-body">
+                        <div class="modal-image">
+                            <img :src="selectedItem?.image" :alt="selectedItem?.title">
+                        </div>
+                        <div class="modal-details">
+                            <h2 x-text="selectedItem?.title"></h2>
+                            <p class="modal-price" x-text="'Rs. ' + selectedItem?.price"></p>
+                            <p class="modal-condition" x-text="'Condition: ' + selectedItem?.condition + '/10'"></p>
+                            <p class="modal-seller">
+                                <i class="fas fa-user"></i> <span x-text="selectedItem?.seller"></span>
+                            </p>
+                            <p class="modal-description" x-text="selectedItem?.description">
+                                This is a detailed description of the item. The seller has provided this information to help you make an informed decision. Please contact the seller for more details.
+                            </p>
+                            <div class="modal-actions">
+                                <button class="btn btn-secondary" @click="messageSeller(selectedItem)">
+                                    <i class="fas fa-comment"></i> Message Seller
+                                </button>
+                                <button class="btn btn-primary">
+                                    <i class="fas fa-bookmark"></i> Save to Interests
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="footer-container">
+                <div class="footer-logo">
+                    <svg width="150" height="30" viewBox="0 0 500 200" xmlns="http://www.w3.org/2000/svg" class="logo-svg">
+                        <text x="-80" y="165" font-family="Arial" font-size="148" font-weight="bold">
+                            <tspan fill="#F9F9F9">FAST</tspan><tspan fill="#CEC0FF">Trade</tspan><tspan fill="#F9F9F9">.</tspan>
+                        </text>
+                    </svg>
+                </div>
+                <div class="footer-links">
+                    <!-- Footer links removed -->
+                </div>
+                <div class="footer-social">
+                    <a href="https://www.linkedin.com/in/sandesh-kumar7/" class="social-link" target="_blank"><i class="fab fa-linkedin"></i></a>
+                    <a href="https://www.instagram.com/sandeshgehanii/" class="social-link" target="_blank"><i class="fab fa-instagram"></i></a>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 FASTTrade. All right are reserved | Sandesh - 23K-2004</p>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            // Initialize AOS
+            AOS.init({
+                duration: 800,
+                easing: 'ease-out',
+                once: true
+            });
+
+            // Check authentication and handle redirection
+            const token = localStorage.getItem('access_token');
+            if (!token) {
+                const currentPath = window.location.pathname;
+                const nextParam = new URLSearchParams(window.location.search).get('next');
+                // Only redirect if we're not already on the login page
+                if (!window.location.pathname.includes('login.html')) {
+                    window.location.href = `login.html?next=${encodeURIComponent(currentPath)}`;
+                }
+            }
+        });
+    </script>
+    <script src="js/listing.js"></script>
+    <script>
+    document.addEventListener("DOMContentLoaded", function() {
+        document.querySelectorAll('a.nav-link[href="login.html"]').forEach(function(link) {
+            const current = window.location.pathname + window.location.search;
+            link.href = "login.html?next=" + encodeURIComponent(current);
+        });
+    });
+    </script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      var img = document.querySelector('.profile-img');
+      if (img) {
+        img.src = localStorage.getItem('profile_image') || 'https://via.placeholder.com/40';
+      }
+    });
+    </script>
+</body>
+</html>

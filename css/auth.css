@@ -1,0 +1,213 @@
+/* Auth pages specific styles */
+.auth-container {
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+.auth-card {
+  background-color: var(--background-color);
+  border-radius: var(--border-radius);
+  box-shadow: var(--box-shadow);
+  padding: 2rem;
+}
+
+.auth-header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.auth-header h2 {
+  margin-bottom: 0.5rem;
+}
+
+.auth-header p {
+  color: var(--text-light);
+}
+
+.auth-form {
+  margin-bottom: 1.5rem;
+}
+
+.compact-form .form-group {
+  margin-bottom: 1rem;
+}
+
+/* Input styles */
+.input-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-container input {
+  width: 100%;
+  padding: 0.75rem 1rem 0.75rem 2.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  font-size: 0.9rem;
+  height: 2.5rem;
+  background-color: var(--background-color);
+  color: var(--text-color);
+}
+
+.input-container input::placeholder {
+  font-size: 0.85rem;
+  color: var(--text-light);
+}
+
+.input-container input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px var(--accent-color);
+}
+
+.input-container .input-icon {
+  position: absolute;
+  left: 1rem;
+  color: var(--text-light);
+  font-size: 1rem;
+}
+
+.input-container .toggle-password {
+  position: absolute;
+  right: 1rem;
+  background: none;
+  border: none;
+  color: var(--text-light);
+  cursor: pointer;
+  padding: 0;
+}
+
+.auth-footer {
+  text-align: center;
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border-color);
+}
+
+/* Verification Form */
+.verification-form {
+  text-align: center;
+}
+
+.verification-message {
+  margin-bottom: 2rem;
+}
+
+.verification-icon {
+  font-size: 3rem;
+  color: var(--primary-color);
+  margin-bottom: 1rem;
+}
+
+.pin-container {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.pin-digit {
+  width: 3rem;
+  height: 3rem;
+  text-align: center;
+  font-size: 1.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+}
+
+.pin-digit:focus {
+  border-color: var(--primary-color);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-color);
+}
+
+.resend-pin {
+  margin-top: 1.5rem;
+  font-size: 0.875rem;
+}
+
+/* Password Strength */
+.password-strength {
+  margin-top: 0.5rem;
+}
+
+.strength-meter {
+  height: 4px;
+  background-color: var(--background-dark);
+  border-radius: 2px;
+  margin-bottom: 0.25rem;
+}
+
+.strength-bar {
+  height: 100%;
+  border-radius: 2px;
+  transition: var(--transition);
+}
+
+.strength-bar.weak {
+  background-color: var(--error-color);
+}
+
+.strength-bar.medium {
+  background-color: var(--secondary-color);
+}
+
+.strength-bar.strong {
+  background-color: var(--success-color);
+}
+
+.strength-text {
+  font-size: 0.75rem;
+}
+
+.strength-text.weak {
+  color: var(--error-color);
+}
+
+.strength-text.medium {
+  color: var(--secondary-color);
+}
+
+.strength-text.strong {
+  color: var(--success-color);
+}
+
+.password-requirements {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-light);
+}
+
+.password-requirements li {
+  margin-bottom: 0.25rem;
+}
+
+.password-requirements li.met {
+  color: var(--success-color);
+}
+
+.password-requirements li.met::before {
+  content: "✓ ";
+}
+
+.password-requirements li:not(.met)::before {
+  content: "○ ";
+}
+
+/* Responsive styles */
+@media (max-width: 768px) {
+  .auth-card {
+    margin: 0 1rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .auth-card {
+    padding: 1.5rem;
+  }
+
+  .form-row {
+    flex-direction: column;
+  }
+}

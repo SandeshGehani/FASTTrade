@@ -1,0 +1,6 @@
+<svg width="500" height="200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Logo Text -->
+  <text x="120" y="100" font-family="Arial" font-size="48" font-weight="bold">
+    <tspan fill="#16498C">FAST</tspan><tspan fill="#CEC0FF">Trade</tspan><tspan fill="#F9F9F9">.</tspan>
+  </text>
+</svg>

@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FASTTrade - Home</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/index.css">
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- AOS for scroll animations -->
+    <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
+    <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lozad/dist/lozad.min.js"></script>
+    <script>
+        // Check token validity on page load
+        async function checkTokenValidity() {
+            const token = localStorage.getItem('access_token');
+            if (token) {
+                try {
+                    const response = await fetch('/api/auth/me', {
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+                    if (!response.ok) {
+                        // If token is invalid, clear it
+                        localStorage.removeItem('access_token');
+                        localStorage.removeItem('refresh_token');
+                        localStorage.removeItem('user');
+                        localStorage.removeItem('profile_image');
+                        window.location.reload();
+                    }
+                } catch (error) {
+                    // If there's an error, clear the token
+                    localStorage.removeItem('access_token');
+                    localStorage.removeItem('refresh_token');
+                    localStorage.removeItem('user');
+                    localStorage.removeItem('profile_image');
+                    window.location.reload();
+                }
+            }
+        }
+        // Run the check when the page loads
+        document.addEventListener('DOMContentLoaded', checkTokenValidity);
+    </script>
+</head>
+<body>
+    <div x-data="{ ...indexData(), mobileMenuOpen: false, profileDropdownOpen: false, loggedIn: !!localStorage.getItem('access_token') }">
+        <!-- Navigation Bar -->
+        <nav class="navbar">
+            <div class="navbar-container">
+                <div class="navbar-logo">
+                    <a href="index.html">
+                        <svg width="150" height="30" viewBox="0 0 500 200" xmlns="http://www.w3.org/2000/svg" class="logo-svg">
+                            <text x="140" y="165" font-family="Arial" font-size="108" font-weight="bold">
+                                <tspan fill="#F9F9F9">FAST</tspan><tspan fill="#CEC0FF">Trade</tspan><tspan fill="#F9F9F9">.</tspan>
+                            </text>
+                        </svg>
+                    </a>
+                </div>
+                
+                <!-- Mobile menu button -->
+                <button class="mobile-menu-button" @click="mobileMenuOpen = !mobileMenuOpen">
+                    <i class="fas fa-bars"></i>
+                </button>
+                
+                <!-- Desktop Navigation -->
+                <div class="navbar-links desktop-nav">
+                    <a href="index.html" class="nav-link active">Home</a>
+                    <a href="listing.html" class="nav-link">Listing</a>
+                    <a href="about.html" class="nav-link">About</a>
+                    <template x-if="loggedIn">
+                        <a href="messages.html" class="nav-link">Chat</a>
+                        <a href="profile.html" class="nav-link">Profile</a>
+                    </template>
+                </div>
+                
+                <!-- Search Bar -->
+                <div class="search-container desktop-search" x-data="{ 
+                    search: '', 
+                    results: [], 
+                    isLoading: false,
+                    error: null,
+                    typingTimeout: null,
+                    async fetchResults() { 
+                        if (!this.search.trim()) {
+                            this.results = [];
+                            return;
+                        }
+                        
+                        this.isLoading = true;
+                        this.error = null;
+                        
+                        clearTimeout(this.typingTimeout);
+                        this.typingTimeout = setTimeout(async () => {
+                            try {
+                                const res = await fetch(`/api/listings?search=${encodeURIComponent(this.search)}`);
+                                if (!res.ok) throw new Error('Failed to fetch results');
+                                const data = await res.json();
+                                this.results = data.listings;
+                                window.updateListings && window.updateListings(this.results);
+                            } catch (err) {
+                                this.error = 'Failed to load search results. Please try again.';
+                                console.error('Search error:', err);
+                            } finally {
+                                this.isLoading = false;
+                            }
+                        }, 300);
+                    }
+                }">
+                    <div class="search-input-wrapper">
+                        <input type="text" 
+                               placeholder="Search for items..." 
+                               class="search-input" 
+                               x-model="search" 
+                               @input="fetchResults"
+                               aria-label="Search items">
+                        <button class="search-button" aria-label="Search">
+                            <i class="fas fa-search"></i>
+                        </button>
+                    </div>
+                    <!-- Loading indicator -->
+                    <div x-show="isLoading" class="search-loading">
+                        <i class="fas fa-spinner fa-spin"></i>
+                    </div>
+                    <!-- Error message -->
+                    <div x-show="error" class="search-error" x-text="error"></div>
+                </div>
+                
+                <!-- Profile Section -->
+                <div class="profile-section desktop-profile" x-data="{ loggedIn: !!localStorage.getItem('access_token'), profileDropdownOpen: false }">
+                    <template x-if="loggedIn">
+                        <div>
+                            <div class="profile-img-container" @click="profileDropdownOpen = !profileDropdownOpen">
+                                <img src="https://via.placeholder.com/40" alt="Profile" class="profile-img">
+                            </div>
+                            <!-- Profile Dropdown -->
+                            <div x-show="profileDropdownOpen" @click.away="profileDropdownOpen = false" class="profile-dropdown">
+                                <a href="profile.html" class="dropdown-item">My Profile</a>
+                                <a href="messages.html" class="dropdown-item">Messages</a>
+                                <template x-if="localStorage.getItem('user_email') === 'k232004@nu.edu.pk'">
+                                    <a href="admin.html" class="dropdown-item">
+                                        <i class="fas fa-shield-alt"></i> Admin Panel
+                                    </a>
+                                </template>
+                                <a href="#" class="dropdown-item" @click="localStorage.clear(); window.location.reload();">Logout</a>
+                            </div>
+                        </div>
+                    </template>
+                    <template x-if="!loggedIn">
+                        <button class="btn btn-primary" @click="window.location.href='login.html'">Join</button>
+                    </template>
+                </div>
+            </div>
+            
+            <!-- Mobile Menu -->
+            <div x-show="mobileMenuOpen" @click.away="mobileMenuOpen = false" class="mobile-menu">
+                <div class="search-container mobile-search">
+                    <div class="search-input-wrapper">
+                        <input type="text" placeholder="Search for items..." class="search-input">
+                        <button class="search-button">
+                            <i class="fas fa-search"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="navbar-links mobile-nav">
+                    <a href="index.html" class="nav-link active">Home</a>
+                    <a href="listing.html" class="nav-link">Listing</a>
+                    <a href="about.html" class="nav-link">About</a>
+                    <template x-if="loggedIn">
+                        <a href="messages.html" class="nav-link">Chat</a>
+                        <a href="profile.html" class="nav-link">Profile</a>
+                        <a href="#" class="nav-link" @click="localStorage.clear(); window.location.reload();">Logout</a>
+                    </template>
+                    <template x-if="!loggedIn">
+                        <a href="#" class="nav-link" @click="window.location.href='login.html'">Join</a>
+                    </template>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <section class="hero-section">
+                <div class="hero-content">
+                    <h1>Buy. Sell. Trade. <span class="highlight">Only at FAST.</span></h1>
+                    <p>The trusted marketplace built just for FAST-NUCES students.</p>
+                    <a href="listing.html" class="btn btn-primary">Explore Listings</a>
+                </div>
+            </section>
+
+            <section id="featured-listings" class="featured-listings-section">
+                <h2>Featured Listings</h2>
+                <div class="listings-grid" x-data="{ 
+                    listings: [], 
+                    currentPage: 1,
+                    itemsPerPage: 6,
+                    totalPages: 1,
+                    isLoading: false,
+                    error: null,
+                    async fetchListings() {
+                        this.isLoading = true;
+                        this.error = null;
+                        try {
+                            const response = await fetch('/api/listings');
+                            if (!response.ok) throw new Error('Failed to fetch listings');
+                            const data = await response.json();
+                            console.log('Raw API Response:', data);
+                            this.listings = data.listings || [];
+                            console.log('First Listing:', this.listings[0]);
+                            console.log('Image URL for first listing:', this.listings[0]?.image);
+                            this.totalPages = Math.ceil(this.listings.length / this.itemsPerPage);
+                            
+                            // Initialize Lozad after listings are loaded
+                            setTimeout(() => {
+                                const observer = lozad();
+                                observer.observe();
+                            }, 100);
+                        } catch (err) {
+                            this.error = 'Failed to load listings. Please try again later.';
+                            console.error('Error fetching listings:', err);
+                        } finally {
+                            this.isLoading = false;
+                        }
+                    },
+                    get paginatedListings() {
+                        const start = (this.currentPage - 1) * this.itemsPerPage;
+                        const end = start + this.itemsPerPage;
+                        return this.listings.slice(start, end);
+                    }
+                }" x-init="fetchListings()">
+                    <!-- Loading State -->
+                    <div x-show="isLoading" class="loading-spinner">
+                        <i class="fas fa-spinner fa-spin"></i> Loading listings...
+                    </div>
+                    
+                    <!-- Error State -->
+                    <div x-show="error" class="error-message" x-text="error"></div>
+                    
+                    <!-- Listings Grid -->
+                    <template x-for="listing in paginatedListings" :key="listing.id">
+                        <div class="listing-card" @click="showListingDetails(listing)">
+                            <div class="listing-image">
+                                <img 
+                                    class="lozad" 
+                                    :data-src="listing.image" 
+                                    :alt="listing.title"
+                                    @load="$el.classList.add('loaded')"
+                                    @error="console.error('Image failed to load:', $el.src); $el.src='/static/images/placeholder.png'"
+                                >
+                                <div class="listing-condition" x-text="'Condition: ' + listing.condition + '/10'"></div>
+                            </div>
+                            <div class="listing-content">
+                                <h3 class="listing-title" x-text="listing.title"></h3>
+                                <div class="listing-price" x-text="'Rs. ' + listing.price"></div>
+                                <div class="listing-seller" x-text="'By ' + listing.seller_id"></div>
+                            </div>
+                        </div>
+                    </template>
+                    
+                    <!-- Pagination -->
+                    <div x-show="!isLoading && !error && listings.length > 0" class="pagination">
+                        <button 
+                            class="pagination-btn" 
+                            @click="currentPage--" 
+                            :disabled="currentPage === 1"
+                        >
+                            Previous
+                        </button>
+                        <span class="pagination-info" x-text="`Page ${currentPage} of ${totalPages}`"></span>
+                        <button 
+                            class="pagination-btn" 
+                            @click="currentPage++" 
+                            :disabled="currentPage === totalPages"
+                        >
+                            Next
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="footer-container">
+                <div class="footer-logo">
+                    <svg width="150" height="30" viewBox="0 0 500 200" xmlns="http://www.w3.org/2000/svg" class="logo-svg">
+                    <text x="-80" y="165" font-family="Arial" font-size="148" font-weight="bold">
+                        <tspan fill="#F9F9F9">FAST</tspan><tspan fill="#CEC0FF">Trade</tspan><tspan fill="#F9F9F9">.</tspan>
+                    </text>
+                </svg>
+            </div>
+            <div class="footer-social">
+                <a href="https://www.linkedin.com/in/sandesh-kumar7/" class="social-link" target="_blank"><i class="fab fa-linkedin"></i></a>
+                <a href="https://www.instagram.com/sandeshgehanii/" class="social-link" target="_blank"><i class="fab fa-instagram"></i></a>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <p>&copy; 2025 FASTTrade. All right are reserved | Sandesh - 23K-2004</p>
+        </div>
+    </footer>
+
+    <!-- Listing Details Modal (moved inside main div) -->
+    <div class="modal" x-show="detailsModalOpen" @click.self="detailsModalOpen = false">
+        <div class="modal-content" x-show="selectedItem">
+            <span class="close-modal" @click="detailsModalOpen = false">&times;</span>
+            <div class="modal-body">
+                <div class="modal-image">
+                    <img :src="selectedItem?.image || 'https://via.placeholder.com/300x200?text=No+Image'" :alt="selectedItem?.title">
+                </div>
+                <div class="modal-details">
+                    <h2 x-text="selectedItem?.title"></h2>
+                    <p class="modal-price" x-text="'Rs. ' + selectedItem?.price"></p>
+                    <p class="modal-condition" x-text="'Condition: ' + selectedItem?.condition + '/10'"></p>
+                    <p class="modal-seller">
+                        <i class="fas fa-user"></i> <span x-text="selectedItem?.seller_id"></span>
+                    </p>
+                    <p class="modal-description" x-text="selectedItem?.description || 'No description available'"></p>
+                    <div class="modal-actions">
+                        <a class="btn btn-primary" :href="'listing.html?id=' + selectedItem?.id" target="_blank">
+                            <i class="fas fa-external-link-alt"></i> View Full Listing
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            // Initialize AOS
+            AOS.init({
+                duration: 800,
+                easing: 'ease-out',
+                once: true
+            });
+
+            // Initialize lozad
+            const observer = lozad();
+            observer.observe();
+        });
+    </script>
+    <script src="js/main.js"></script>
+    <script src="js/index.js"></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      var img = document.querySelector('.profile-img');
+      if (img) {
+        img.src = localStorage.getItem('profile_image') || '/static/images/placeholder.png';
+      }
+
+      // Initialize lozad
+      const observer = lozad();
+      observer.observe();
+    });
+    </script>
+</body>
+</html>
