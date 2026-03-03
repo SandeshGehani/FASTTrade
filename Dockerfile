@@ -1,24 +1,29 @@
 # Use the official Python lightweight image
 FROM python:3.10-slim
 
+# Add a non-root user (Required by Hugging Face Spaces)
+RUN useradd -m -u 1000 user
+USER user
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH
+
 # Set working directory
 WORKDIR /app
 
 # Copy dependency file and install
-COPY requirements.txt .
+COPY --chown=user requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install gunicorn
+RUN pip install gunicorn eventlet
 
 # Copy all project files
-COPY . .
+COPY --chown=user . .
 
-# Expose the Cloud Run port
-EXPOSE 8080
+# Expose the correct port for Hugging Face (7860)
+EXPOSE 7860
 
-# Environment variables for Cloud Run
-ENV PORT=8080
+# Environment variables
+ENV PORT=7860
 ENV FLASK_ENV=production
 
-# Start the application using Gunicorn for production
-# We bind it to 0.0.0.0 and the dynamic port given by Cloud Run
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "app:app"]
+# Start the application using Gunicorn + Eventlet (For WebSockets)
+CMD ["gunicorn", "--worker-class", "eventlet", "-w", "1", "-b", "0.0.0.0:7860", "app:app"]
