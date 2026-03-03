@@ -14,3 +14,4 @@ simple-websocket==0.10.1
 psycopg2-binary==2.9.9
 cloudinary==1.36.0
 gunicorn==21.2.0
+Flask-Mail==0.9.1
