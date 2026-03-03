@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FASTTrade - Profile</title>
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo.svg">
+    <link rel="icon" type="image/png" href="/static/images/logo.png">
+    <link rel="shortcut icon" href="/favicon.ico">
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/profile.css">
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- AOS for scroll animations -->
+    <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
+    <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
+</head>
+<body>
+    <div id="navbar"></div>
+    <div x-data="profileData()" x-init="initProfile()">
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="profile-container">
+                <div class="profile-header">
+                    <h2>My Profile</h2>
+                    <p>Manage your personal information and listings</p>
+                </div>
+                
+                <div class="profile-content">
+                    <!-- Profile Sidebar -->
+                    <aside class="profile-sidebar">
+                        <div class="profile-avatar-container">
+                            <div class="profile-avatar">
+                                <img :src="profileImage || 'static/images/default.png'" alt="Profile" class="avatar-img" @error="$el.src='static/images/default.png'">
+                                <div class="avatar-overlay" @click="triggerFileInput">
+                                    <i class="fas fa-camera"></i>
+                                    <span>Change Photo</span>
+                                </div>
+                                <input 
+                                    type="file" 
+                                    id="profile-image-upload" 
+                                    accept="image/*" 
+                                    class="hidden-file-input"
+                                    @change="handleImageUpload"
+                                >
+                            </div>
+                            <h3 class="profile-name" x-text="userData.fullName"></h3>
+                            <p class="profile-email" x-text="userData.email"></p>
+                        </div>
+                        
+                        <div class="profile-stats">
+                            <div class="stat-item">
+                                <span class="stat-value" x-text="userData.listingsCount"></span>
+                                <span class="stat-label">Listings</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-value" x-text="userData.soldCount"></span>
+                                <span class="stat-label">Sold</span>
+                            </div>
+                        </div>
+                        
+                        <div class="profile-actions">
+                            <a href="listing.html?filter=my-listings" class="btn btn-secondary btn-block">
+                                <i class="fas fa-list"></i> My Listings
+                            </a>
+                            <a href="create-listing.html" class="btn btn-primary btn-block">
+                                <i class="fas fa-plus"></i> Add New Listing
+                            </a>
+                        </div>
+                    </aside>
+                    
+                    <!-- Profile Form -->
+                    <div class="profile-form-container">
+                        <div class="profile-form-header">
+                            <h3>Personal Information</h3>
+                            <p>Update your personal details</p>
+                        </div>
+                        
+                        <form class="profile-form" @submit.prevent="saveProfile">
+                            <div class="form-group">
+                                <label for="fullName">Full Name</label>
+                                <div class="input-container">
+                                    <i class="fas fa-user input-icon"></i>
+                                    <input 
+                                        type="text" 
+                                        id="fullName" 
+                                        x-model="userData.fullName" 
+                                        placeholder="Enter your full name" 
+                                        required
+                                    >
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="phone">Phone Number</label>
+                                <div class="input-container">
+                                    <i class="fas fa-phone input-icon"></i>
+                                    <input 
+                                        type="tel" 
+                                        id="phone" 
+                                        x-model="userData.phone" 
+                                        placeholder="Enter your phone number" 
+                                        required
+                                        @input="validatePhone"
+                                    >
+                                </div>
+                                <p class="error-message" x-show="phoneError" x-text="phoneError"></p>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="email">FAST Email</label>
+                                <div class="input-container">
+                                    <i class="fas fa-envelope input-icon"></i>
+                                    <input 
+                                        type="email" 
+                                        id="email" 
+                                        x-model="userData.email" 
+                                        placeholder="youremail@nu.edu.pk" 
+                                        disabled
+                                    >
+                                </div>
+                                <p class="help-text">Email cannot be changed</p>
+                            </div>
+                            
+                            <div class="form-divider">
+                                <span>Change Password</span>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="currentPassword">Current Password</label>
+                                <div class="input-container">
+                                    <i class="fas fa-lock input-icon"></i>
+                                    <input 
+                                        :type="showCurrentPassword ? 'text' : 'password'" 
+                                        id="currentPassword" 
+                                        x-model="userData.currentPassword" 
+                                        placeholder="Enter current password"
+                                    >
+                                    <button 
+                                        type="button" 
+                                        class="password-toggle" 
+                                        @click="showCurrentPassword = !showCurrentPassword"
+                                    >
+                                        <i :class="showCurrentPassword ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="newPassword">New Password</label>
+                                <div class="input-container">
+                                    <i class="fas fa-lock input-icon"></i>
+                                    <input 
+                                        :type="showNewPassword ? 'text' : 'password'" 
+                                        id="newPassword" 
+                                        x-model="userData.newPassword" 
+                                        placeholder="Enter new password"
+                                        @input="validatePassword"
+                                    >
+                                    <button 
+                                        type="button" 
+                                        class="password-toggle" 
+                                        @click="showNewPassword = !showNewPassword"
+                                    >
+                                        <i :class="showNewPassword ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+                                    </button>
+                                </div>
+                                <div class="password-strength" x-show="userData.newPassword">
+                                    <div class="strength-meter">
+                                        <div 
+                                            class="strength-bar" 
+                                            :class="{
+                                                'weak': passwordStrength === 'weak',
+                                                'medium': passwordStrength === 'medium',
+                                                'strong': passwordStrength === 'strong'
+                                            }"
+                                            :style="{ width: passwordStrengthPercent + '%' }"
+                                        ></div>
+                                    </div>
+                                    <p class="strength-text" :class="passwordStrength">
+                                        <span x-text="passwordStrengthText"></span>
+                                    </p>
+                                </div>
+                                <ul class="password-requirements" x-show="userData.newPassword">
+                                    <li :class="{ 'met': hasUppercase }">At least 1 uppercase letter</li>
+                                    <li :class="{ 'met': hasNumber }">At least 1 number</li>
+                                    <li :class="{ 'met': hasSpecial }">At least 1 special character</li>
+                                    <li :class="{ 'met': hasMinLength }">At least 8 characters long</li>
+                                </ul>
+                                <p class="error-message" x-show="passwordError" x-text="passwordError"></p>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="confirmPassword">Confirm New Password</label>
+                                <div class="input-container">
+                                    <i class="fas fa-lock input-icon"></i>
+                                    <input 
+                                        :type="showConfirmPassword ? 'text' : 'password'" 
+                                        id="confirmPassword" 
+                                        x-model="userData.confirmPassword" 
+                                        placeholder="Confirm new password"
+                                        @input="validateConfirmPassword"
+                                    >
+                                    <button 
+                                        type="button" 
+                                        class="password-toggle" 
+                                        @click="showConfirmPassword = !showConfirmPassword"
+                                    >
+                                        <i :class="showConfirmPassword ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+                                    </button>
+                                </div>
+                                <p class="error-message" x-show="confirmPasswordError" x-text="confirmPasswordError"></p>
+                            </div>
+                            
+                            <div class="form-actions">
+                                <button type="button" class="btn btn-secondary" @click="resetForm">Cancel</button>
+                                <button type="submit" class="btn btn-primary" :disabled="isSubmitting">
+                                    <span  class="btn btn-primary" :disabled="isSubmitting">
+                                    <span x-show="!isSubmitting">Save Changes</span>
+                                    <span x-show="isSubmitting"><i class="fas fa-spinner fa-spin"></i> Saving...</span>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <div id="footer"></div>
+    </div>
+
+    <script src="js/auth.js"></script>
+    <script src="js/toast.js"></script>
+    <script src="js/navbar.js"></script>
+    <script src="js/footer.js"></script>
+    <script src="js/profile.js"></script>
+</body>
+</html>

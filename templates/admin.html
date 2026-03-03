@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FASTTrade - Admin Dashboard</title>
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo.svg">
+    <link rel="icon" type="image/png" href="/static/images/logo.png">
+    <link rel="shortcut icon" href="/favicon.ico">
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/admin.css">
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div id="navbar"></div>
+    <div x-data="{ mobileMenuOpen: false, profileDropdownOpen: false, activeTab: 'listings' }">
+
+        <!-- Main Content -->
+        <main class="main-content" x-data="adminData()" x-init="init()">
+            <div class="admin-container">
+                <!-- Confirmation Dialog -->
+                <div x-show="showDeleteConfirm" class="modal-overlay" @click.away="showDeleteConfirm = false">
+                    <div class="modal-content">
+                        <h3>Confirm Delete</h3>
+                        <p>Are you sure you want to delete this <span x-text="deleteType"></span>?</p>
+                        <div class="modal-actions">
+                            <button class="btn btn-secondary" @click="showDeleteConfirm = false">Cancel</button>
+                            <button class="btn btn-danger" @click="deleteItem()">Delete</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Error Message -->
+                <div x-show="error" class="error-message" x-text="error"></div>
+
+                <!-- Loading State -->
+                <div x-show="isLoading" class="loading-state">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <span>Loading...</span>
+                </div>
+
+                <!-- Admin Header -->
+                <div class="admin-header">
+                    <h1>Admin Dashboard</h1>
+                    <div class="admin-tabs">
+                        <button 
+                            class="tab-btn" 
+                            :class="{ 'active': activeTab === 'listings' }"
+                            @click="setActiveTab('listings')"
+                        >
+                            <i class="fas fa-box"></i> Listings
+                        </button>
+                        <button 
+                            class="tab-btn" 
+                            :class="{ 'active': activeTab === 'users' }"
+                            @click="setActiveTab('users')"
+                        >
+                            <i class="fas fa-users"></i> Users
+                        </button>
+                        <!-- <button 
+                            class="tab-btn" 
+                            :class="{ 'active': activeTab === 'transactions' }"
+                            @click="setActiveTab('transactions')"
+                        >
+                            <i class="fas fa-receipt"></i> Transactions
+                        </button>
+                        <button 
+                            class="tab-btn" 
+                            :class="{ 'active': activeTab === 'activity' }"
+                            @click="setActiveTab('activity')"
+                        >
+                            <i class="fas fa-clipboard-list"></i> Activity
+                        </button> -->
+                    </div>
+                </div>
+
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <p>Total Listings</p>
+                        <h3 x-text="metrics.totalListings"></h3>
+                        <span x-text="`${metrics.soldListings} sold`"></span>
+                    </div>
+                    <div class="metric-card">
+                        <p>Total Users</p>
+                        <h3 x-text="metrics.totalUsers"></h3>
+                        <span>Registered members</span>
+                    </div>
+                    <!-- <div class="metric-card">
+                        <p>Transactions</p>
+                        <h3 x-text="metrics.totalTransactions"></h3>
+                        <span x-text="`PKR ${metrics.totalVolume.toLocaleString()}`"></span>
+                    </div> -->
+                    <div class="metric-card">
+                        <p>Top Category</p>
+                        <h3 x-text="categoryStats[0]?.name || '—'"></h3>
+                        <span x-text="categoryStats[0] ? `${categoryStats[0].count} listings` : ''"></span>
+                    </div>
+                </div>
+
+                <div class="insights-panel" x-show="categoryStats.length > 0">
+                    <h3>Top Categories</h3>
+                    <ul>
+                        <template x-for="category in categoryStats" :key="category.id">
+                            <li>
+                                <span x-text="category.name"></span>
+                                <span class="pill" x-text="category.count + ' listings'"></span>
+                            </li>
+                        </template>
+                    </ul>
+                </div>
+
+                <!-- Listings Tab -->
+                <div class="admin-content" x-show="activeTab === 'listings'">
+                    <div class="search-bar">
+                        <div class="input-container">
+                            <i class="fas fa-search input-icon"></i>
+                            <input 
+                                type="text" 
+                                placeholder="Search listings..." 
+                                x-model="searchQuery"
+                                @input="searchListings"
+                            >
+                        </div>
+                    </div>
+
+                    <div class="admin-table">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Title</th>
+                                    <th>Price</th>
+                                    <th>Seller</th>
+                                    <th>Date</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                        <template x-for="listing in filteredListings" :key="listing.id">
+                                    <tr>
+                                        <td x-text="listing.title"></td>
+                                        <td x-text="'Rs. ' + listing.price"></td>
+                                        <td x-text="listing.seller_id"></td>
+                                        <td x-text="new Date(listing.created_at).toLocaleDateString()"></td>
+                                        <td>
+                                            <button class="btn btn-danger btn-sm" 
+                                                    @click="confirmDelete(listing, 'listing')">
+                                                <i class="fas fa-trash"></i>
+                                        </button>
+                                        </td>
+                                    </tr>
+                        </template>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Empty State -->
+                    <div class="empty-state" x-show="filteredListings.length === 0">
+                        <i class="fas fa-search empty-icon"></i>
+                        <h3>No listings found</h3>
+                        <p>Try adjusting your search criteria</p>
+                    </div>
+                </div>
+
+                <!-- Users Tab -->
+                <div class="admin-content" x-show="activeTab === 'users'">
+                    <div class="search-bar">
+                        <div class="input-container">
+                            <i class="fas fa-search input-icon"></i>
+                            <input 
+                                type="text" 
+                                placeholder="Search users..." 
+                                x-model="searchQuery"
+                                @input="searchUsers"
+                            >
+                        </div>
+                    </div>
+
+                    <div class="admin-table">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Email</th>
+                                    <th>Phone</th>
+                                    <th>Joined</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                        <template x-for="user in filteredUsers" :key="user.id">
+                                    <tr>
+                                        <td x-text="user.full_name"></td>
+                                        <td x-text="user.email"></td>
+                                        <td x-text="user.phone"></td>
+                                        <td x-text="new Date(user.created_at).toLocaleDateString()"></td>
+                                        <td>
+                                            <button class="btn btn-danger btn-sm" 
+                                                    @click="confirmDelete(user, 'user')">
+                                                <i class="fas fa-trash"></i>
+                                    </button>
+                                        </td>
+                                    </tr>
+                        </template>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Empty State -->
+                    <div class="empty-state" x-show="filteredUsers.length === 0">
+                        <i class="fas fa-search empty-icon"></i>
+                        <h3>No users found</h3>
+                        <p>Try adjusting your search criteria</p>
+                    </div>
+                </div>
+
+                <!-- Transactions Tab -->
+                <div class="admin-content" x-show="activeTab === 'transactions'">
+                    <div class="admin-table">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Listing</th>
+                                    <th>Buyer</th>
+                                    <th>Seller</th>
+                                    <th>Amount (PKR)</th>
+                                    <th>Status</th>
+                                    <th>Date</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="transaction in transactions" :key="transaction.id">
+                                    <tr>
+                                        <td x-text="transaction.id"></td>
+                                        <td x-text="transaction.listing_id"></td>
+                                        <td x-text="transaction.buyer_id"></td>
+                                        <td x-text="transaction.seller_id"></td>
+                                        <td x-text="transaction.amount?.toLocaleString() || '—'"></td>
+                                        <td x-text="transaction.status"></td>
+                                        <td x-text="formatDate(transaction.created_at)"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="empty-state" x-show="transactions.length === 0">
+                        <i class="fas fa-receipt empty-icon"></i>
+                        <h3>No transactions yet</h3>
+                        <p>Completed deals will appear here.</p>
+                    </div>
+                </div>
+
+                <!-- Activity Tab -->
+                <div class="admin-content" x-show="activeTab === 'activity'">
+                    <div class="activity-feed">
+                        <template x-for="action in actions" :key="action.id">
+                            <div class="activity-card">
+                                <div class="activity-meta">
+                                    <span class="pill" x-text="action.action_type"></span>
+                                    <span class="activity-date" x-text="formatDate(action.created_at)"></span>
+                                </div>
+                                <p x-text="action.description"></p>
+                                <small>
+                                    Admin #<span x-text="action.admin_id"></span>
+                                    <template x-if="action.target_user_id">
+                                        <span> • User #<span x-text="action.target_user_id"></span></span>
+                                    </template>
+                                    <template x-if="action.target_listing_id">
+                                        <span> • Listing #<span x-text="action.target_listing_id"></span></span>
+                                    </template>
+                                </small>
+                            </div>
+                        </template>
+                    </div>
+                    <div class="empty-state" x-show="actions.length === 0">
+                        <i class="fas fa-clipboard-list empty-icon"></i>
+                        <h3>No activity yet</h3>
+                        <p>Moderation actions will show up here.</p>
+                    </div>
+                </div>
+
+                <!-- Pagination -->
+                <div class="pagination" x-show="!isLoading && !error && totalPages > 1">
+                    <button class="pagination-btn" 
+                            @click="currentPage--; activeTab === 'listings' ? fetchListings() : fetchUsers()" 
+                            :disabled="currentPage === 1"
+                            aria-label="Previous page">
+                        <i class="fas fa-chevron-left"></i>
+                    </button>
+                    <span class="pagination-info" x-text="`Page ${currentPage} of ${totalPages}`"></span>
+                    <button class="pagination-btn" 
+                            @click="currentPage++; activeTab === 'listings' ? fetchListings() : fetchUsers()" 
+                            :disabled="currentPage === totalPages"
+                            aria-label="Next page">
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <div id="footer"></div>
+    </div>
+
+    <script src="js/auth.js"></script>
+    <script src="js/toast.js"></script>
+    <script src="js/navbar.js"></script>
+    <script src="js/footer.js"></script>
+    <script src="js/admin.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            await auth.init();
+            auth.requireAdmin({ fallback: 'index.html' });
+        });
+    </script>
+</body>
+</html> 

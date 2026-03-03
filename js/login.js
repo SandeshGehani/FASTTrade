@@ -89,7 +89,7 @@ function loginData() {
         if (nextPage) {
           window.location.href = decodeURIComponent(nextPage);
         } else {
-          window.location.href = '/profile.html';
+          window.location.href = 'profile.html';
         }
       }
     }

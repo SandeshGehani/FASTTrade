@@ -18,13 +18,9 @@ function createListingData() {
     // Initialize categories
     categories: [],
     async init() {
-      // Check authentication first
-      const token = localStorage.getItem('access_token');
-      if (!token) {
-        const currentPath = window.location.pathname;
-        window.location.href = `login.html?next=${encodeURIComponent(currentPath)}`;
-        return;
-      }
+      await auth.init();
+      if (!auth.requireLogin()) return;
+      const { token } = auth.getState();
 
       try {
         const response = await fetch('/api/categories', {
@@ -78,13 +74,9 @@ function createListingData() {
 
     // Submit listing
     async submitListing() {
-      // Check authentication first
-      const token = localStorage.getItem('access_token');
-      if (!token) {
-        const currentPath = window.location.pathname;
-        window.location.href = `login.html?next=${encodeURIComponent(currentPath)}`;
-        return;
-      }
+      await auth.init();
+      if (!auth.requireLogin()) return;
+      const { token } = auth.getState();
 
       if (!this.imagePreview) {
         this.error = "Please upload an image for your listing"
@@ -129,7 +121,8 @@ function createListingData() {
         }
 
         const result = await response.json()
-        window.location.href = '/listing.html'
+        toast?.show?.('Listing created successfully!', 'success');
+        window.location.href = 'listing.html'
       } catch (error) {
         console.error('Error creating listing:', error)
         this.error = error.message

@@ -12,6 +12,73 @@
     margin-bottom: 2rem;
 }
 
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.metric-card {
+    background: #fff;
+    border-radius: 0.75rem;
+    padding: 1rem 1.25rem;
+    box-shadow: var(--box-shadow, 0 10px 30px rgba(0,0,0,0.05));
+}
+
+.metric-card p {
+    margin: 0;
+    color: #7c8aa0;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.metric-card h3 {
+    margin: 0.35rem 0;
+    font-size: 1.75rem;
+    color: #2d2d6e;
+}
+
+.metric-card span {
+    color: #7c8aa0;
+    font-size: 0.85rem;
+}
+
+.insights-panel {
+    background: #fff;
+    border-radius: 0.75rem;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    box-shadow: var(--box-shadow, 0 10px 30px rgba(0,0,0,0.05));
+}
+
+.insights-panel h3 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    color: #2d2d6e;
+}
+
+.insights-panel ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.insights-panel li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid #f0f0f5;
+}
+
+.insights-panel li:last-child {
+    border-bottom: none;
+}
+
 .admin-header h1 {
     font-size: 2rem;
     color: #2d2d6e;
@@ -280,6 +347,42 @@
 .btn-secondary:hover {
     background: #b3a0ff;
     color: #fff;
+}
+
+.pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    background: #ecebff;
+    color: #4c1d95;
+    font-weight: 600;
+}
+
+.activity-feed {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.activity-card {
+    background: #fff;
+    border-radius: 0.75rem;
+    padding: 1rem 1.25rem;
+    box-shadow: var(--box-shadow, 0 8px 24px rgba(0,0,0,0.05));
+}
+
+.activity-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.activity-date {
+    color: #7c8aa0;
+    font-size: 0.85rem;
 }
 
 /* Modal Styles */

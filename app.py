@@ -3,33 +3,50 @@ import random
 import string
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, send_from_directory, redirect
-from flask_sqlalchemy import SQLAlchemy
-from flask_bcrypt import Bcrypt
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from flask_cors import CORS
+from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity, decode_token
+from flask_socketio import join_room, emit, disconnect
+from sqlalchemy import or_
 import os
 from werkzeug.utils import secure_filename
-from werkzeug.security import generate_password_hash
-from flask_mail import Mail
 from flask_mail import Message as MailMessage
-from extensions import mail, init_extensions
+from config import Config
+from extensions import init_extensions, db, bcrypt, jwt, mail, socketio
+
+import cloudinary
+import cloudinary.uploader
+from cloudinary.utils import cloudinary_url
 
 # --- Flask App Setup ---
-app = Flask(__name__, static_folder='.', static_url_path='')
+app = Flask(__name__, static_folder='.', static_url_path='', template_folder='templates')
+app.config.from_object(Config)
 CORS(app)
 
-# --- Config ---
-app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{os.path.join(os.path.abspath(os.path.dirname(__file__)), "instance", "fasttrade.db")}'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['JWT_SECRET_KEY'] = 'YL6Y6eGXY2vons4yQXerpgJIHa-pV601WX4RDRKR-_U'
-app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
-app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=30)
-UPLOAD_FOLDER = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'uploads')
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+# Ensure important directories exist
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # --- Extensions ---
-from extensions import init_extensions, db, bcrypt, jwt
 init_extensions(app)
+
+# --- Cloud Storage ---
+# Cloudinary config (auto-configured if CLOUDINARY_URL is in env)
+if os.environ.get('CLOUDINARY_URL'):
+    cloudinary.config()
+
+def upload_image_helper(image_file, prefix="img"):
+    """Uploads image to Cloudinary if configured, otherwise saves locally."""
+    if os.environ.get('CLOUDINARY_URL'):
+        try:
+            result = cloudinary.uploader.upload(image_file)
+            return result.get('secure_url')
+        except Exception as e:
+            print(f"Cloudinary upload failed: {e}")
+            return None
+    else:
+        filename = secure_filename(f"{prefix}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{image_file.filename}")
+        image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        image_file.save(image_path)
+        return f"/uploads/{filename}"
 
 # --- Models ---
 class User(db.Model):
@@ -40,6 +57,7 @@ class User(db.Model):
     password = db.Column(db.String(128), nullable=False)
     phone = db.Column(db.String(20), nullable=False)
     profile_image = db.Column(db.String(255), nullable=True)
+    role = db.Column(db.String(20), nullable=False, default=Config.DEFAULT_USER_ROLE)
     is_verified = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -54,6 +72,7 @@ class User(db.Model):
             'email': self.email,
             'phone': self.phone,
             'profile_image': self.profile_image,
+            'role': self.role,
             'is_verified': self.is_verified,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
@@ -63,9 +82,11 @@ class Category(db.Model):
     __tablename__ = 'categories'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), nullable=False, unique=True)
+    description = db.Column(db.String(255), nullable=True)
     listings = db.relationship('Listing', backref='category', lazy=True)
+
     def to_dict(self):
-        return {'id': self.id, 'name': self.name}
+        return {'id': self.id, 'name': self.name, 'description': self.description}
 
 class Listing(db.Model):
     __tablename__ = 'listings'
@@ -80,6 +101,7 @@ class Listing(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     sold = db.Column(db.Boolean, default=False)
+    status = db.Column(db.String(20), nullable=False, default='available')
     def to_dict(self):
         return {
             'id': self.id,
@@ -92,7 +114,8 @@ class Listing(db.Model):
             'category_id': self.category_id,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
-            'sold': self.sold
+            'sold': self.sold,
+            'status': self.status
         }
 
 class Message(db.Model):
@@ -101,15 +124,64 @@ class Message(db.Model):
     sender_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     receiver_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     content = db.Column(db.Text, nullable=False)
-    read = db.Column(db.Boolean, default=False)
+    listing_id = db.Column(db.Integer, db.ForeignKey('listings.id'), nullable=True)
+    is_read = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
     def to_dict(self):
         return {
             'id': self.id,
             'sender_id': self.sender_id,
             'receiver_id': self.receiver_id,
             'content': self.content,
-            'read': self.read,
+            'listing_id': self.listing_id,
+            'is_read': self.is_read,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+
+class Transaction(db.Model):
+    __tablename__ = 'transactions'
+    id = db.Column(db.Integer, primary_key=True)
+    buyer_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    seller_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    listing_id = db.Column(db.Integer, db.ForeignKey('listings.id'), nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+    status = db.Column(db.String(20), nullable=False, default='pending')
+    payment_status = db.Column(db.String(20), nullable=False, default='unpaid')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'buyer_id': self.buyer_id,
+            'seller_id': self.seller_id,
+            'listing_id': self.listing_id,
+            'amount': self.amount,
+            'status': self.status,
+            'payment_status': self.payment_status,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+
+class AdminAction(db.Model):
+    __tablename__ = 'admin_actions'
+    id = db.Column(db.Integer, primary_key=True)
+    admin_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    target_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    target_listing_id = db.Column(db.Integer, db.ForeignKey('listings.id'), nullable=True)
+    action_type = db.Column(db.String(50), nullable=False)
+    description = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'admin_id': self.admin_id,
+            'target_user_id': self.target_user_id,
+            'target_listing_id': self.target_listing_id,
+            'action_type': self.action_type,
+            'description': self.description,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
 
@@ -118,12 +190,98 @@ def validate_email(email):
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return bool(re.match(pattern, email))
 
-def validate_password(password):
-    return True  # Accept any password for demo
 
 def validate_phone(phone):
     pattern = r'^[0-9]{11}$'
     return bool(re.match(pattern, phone))
+
+def sanitize_role(role):
+    allowed_roles = app.config.get('ALLOWED_USER_ROLES', Config.ALLOWED_USER_ROLES)
+    default_role = app.config.get('DEFAULT_USER_ROLE', Config.DEFAULT_USER_ROLE)
+    if not role:
+        return default_role
+    normalized = role.lower()
+    return normalized if normalized in allowed_roles else default_role
+
+def is_admin(user) -> bool:
+    return bool(user and user.role == 'admin')
+
+
+def record_admin_action(admin_id, action_type, description, target_user_id=None, target_listing_id=None):
+    action = AdminAction(
+        admin_id=admin_id,
+        target_user_id=target_user_id,
+        target_listing_id=target_listing_id,
+        action_type=action_type,
+        description=description
+    )
+    db.session.add(action)
+
+
+def notify_read_receipt(reader_id: int, partner_id: int):
+    try:
+        socketio.emit('read_receipt', {'reader_id': reader_id}, room=f"user_{partner_id}")
+    except Exception as exc:
+        if app.config.get('DEBUG'):
+            print(f"Failed to emit read receipt: {exc}")
+
+
+def mark_messages_read(reader_id: int, partner_id: int) -> int:
+    try:
+        updated = Message.query.filter(
+            (Message.sender_id == partner_id) &
+            (Message.receiver_id == reader_id) &
+            (Message.is_read.is_(False))
+        ).update({'is_read': True}, synchronize_session=False)
+        if updated:
+            db.session.commit()
+            notify_read_receipt(reader_id, partner_id)
+        return updated
+    except Exception as exc:
+        db.session.rollback()
+        if app.config.get('DEBUG'):
+            print(f"Failed to mark messages read: {exc}")
+        return 0
+
+
+def get_user_id_from_token(raw_token):
+    if not raw_token:
+        raise ValueError("Missing token")
+    decoded = decode_token(raw_token)
+    identity = decoded.get('sub')
+    if identity is None:
+        raise ValueError("Invalid token payload")
+    return int(identity)
+
+
+@socketio.on('join')
+def handle_join(data):
+    token = (data or {}).get('token')
+    try:
+        user_id = get_user_id_from_token(token)
+    except Exception as exc:
+        emit('socket_error', {'message': 'Authentication failed', 'details': str(exc)})
+        disconnect()
+        return
+    join_room(f"user_{user_id}")
+    emit('socket_ready', {'message': 'Connected', 'user_id': user_id})
+
+
+@socketio.on('mark_read')
+def handle_mark_read(data):
+    token = (data or {}).get('token')
+    other_user_id = (data or {}).get('other_user_id')
+    if not other_user_id:
+        emit('socket_error', {'message': 'Missing other_user_id for mark_read'})
+        return
+    try:
+        user_id = get_user_id_from_token(token)
+    except Exception as exc:
+        emit('socket_error', {'message': 'Authentication failed', 'details': str(exc)})
+        disconnect()
+        return
+    updated = mark_messages_read(user_id, int(other_user_id))
+    emit('read_ack', {'updated': updated})
 
 # --- OTP/Email Logic (no real email sending for demo) ---
 otp_storage = {}
@@ -131,10 +289,6 @@ def generate_otp(length=6):
     return ''.join(random.choices(string.digits, k=length))
 def send_verification_email(email, otp):
     try:
-        print("Attempting to send email...")
-        print("MAIL_USERNAME:", os.getenv("MAIL_USERNAME"))
-        print("MAIL_PASSWORD:", "***" if os.getenv("MAIL_PASSWORD") else "Not set")
-        
         msg = MailMessage(
             'Your FASTTrade Verification Code',
             recipients=[email],
@@ -145,13 +299,11 @@ def send_verification_email(email, otp):
             'otp': otp,
             'expires_at': datetime.utcnow() + timedelta(minutes=10)
         }
-        print(f"Sent OTP to {email}: {otp}")
+        if app.config.get('DEBUG'):
+            print(f"Sent OTP to {email}: {otp}")
         return True
     except Exception as e:
         print(f"Failed to send verification email to {email}: {e}")
-        import traceback
-        print("Full traceback:")
-        print(traceback.format_exc())
         return False
 def verify_otp(email, otp):
     if email not in otp_storage:
@@ -165,11 +317,6 @@ def verify_otp(email, otp):
         return True
     return False
 
-def resend_otp(email):
-    if email in otp_storage:
-        del otp_storage[email]
-    new_otp = generate_otp()
-    return send_verification_email(email, new_otp)
 
 def init_default_categories():
     try:
@@ -178,20 +325,20 @@ def init_default_categories():
             if app.config.get('DEBUG'):
                 print("Initializing default categories...")
             default_categories = [
-                'Electronics',
-                'Clothing',
-                'Books',
-                'Home & Garden',
-                'Sports & Outdoors',
-                'Toys & Games',
-                'Automotive',
-                'Health & Beauty'
+                {'name': 'Electronics', 'description': 'Phones, laptops, gadgets, accessories'},
+                {'name': 'Clothing', 'description': 'Apparel and wearable accessories'},
+                {'name': 'Books', 'description': 'Course books, novels, reference material'},
+                {'name': 'Home & Garden', 'description': 'Furniture, decor, and household items'},
+                {'name': 'Sports & Outdoors', 'description': 'Sports gear and outdoor equipment'},
+                {'name': 'Toys & Games', 'description': 'Games, collectibles, and hobby items'},
+                {'name': 'Automotive', 'description': 'Vehicle accessories and related items'},
+                {'name': 'Health & Beauty', 'description': 'Personal care and wellness products'}
             ]
             
-            for category_name in default_categories:
-                if not Category.query.filter_by(name=category_name).first():
-                    category = Category(name=category_name)
-                    db.session.add(category)
+            for category in default_categories:
+                if not Category.query.filter_by(name=category['name']).first():
+                    category_obj = Category(name=category['name'], description=category.get('description'))
+                    db.session.add(category_obj)
             
             db.session.commit()
             if app.config.get('DEBUG'):
@@ -214,6 +361,7 @@ def insert_test_users():
             password=bcrypt.generate_password_hash('password1').decode('utf-8'),
             phone='03001234567',
             profile_image=None,
+            role='student',
             is_verified=True
         )
         db.session.add(user1)
@@ -225,6 +373,7 @@ def insert_test_users():
             password=bcrypt.generate_password_hash('password2').decode('utf-8'),
             phone='03007654321',
             profile_image=None,
+            role='admin',
             is_verified=True
         )
         db.session.add(user2)
@@ -275,11 +424,18 @@ def register():
 
         # Create new user
         hashed_password = bcrypt.generate_password_hash(data['password']).decode('utf-8')
+        # Role assignment (admins created manually by staff)
+        requested_role = data.get('role')
+        candidate_role = sanitize_role(requested_role)
+        if candidate_role == 'admin':
+            candidate_role = app.config.get('DEFAULT_USER_ROLE', 'student')
+
         new_user = User(
             full_name=data['full_name'],
             email=data['email'],
             password=hashed_password,
             phone=data['phone'],
+            role=candidate_role,
             is_verified=False  # User is not verified until OTP is entered
         )
 
@@ -303,22 +459,16 @@ def register():
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     data = request.get_json()
-    print('Login attempt:', data)
     if not data or 'email' not in data or 'password' not in data:
-        print('Missing email or password')
         return jsonify({'error': 'Email and password are required'}), 400
     user = User.query.filter_by(email=data['email']).first()
     if not user:
-        print('User not found:', data['email'])
         return jsonify({'error': 'Invalid email or password'}), 401
     if not user.check_password(data['password']):
-        print('Invalid password for:', data['email'])
         return jsonify({'error': 'Invalid email or password'}), 401
     if not user.is_verified:
-        print('User not verified:', data['email'])
         return jsonify({'error': 'Please verify your email first'}), 403
     access_token = create_access_token(identity=str(user.id))
-    print('Login successful for:', data['email'])
     return jsonify({
         'message': 'Login successful',
         'user': user.to_dict(),
@@ -367,14 +517,41 @@ def verify_email():
 def get_listings():
     search = request.args.get('search', '').strip()
     sort_by = request.args.get('sort_by', '').strip()
+    status_filter = request.args.get('status', '').strip()
+    category_id = request.args.get('category_id')
+    min_price = request.args.get('min_price')
+    max_price = request.args.get('max_price')
+
     query = Listing.query
     if search:
         query = query.filter(
             (Listing.title.ilike(f'%{search}%')) |
             (Listing.description.ilike(f'%{search}%'))
         )
-    # Optionally handle sort_by param
-    listings = query.order_by(Listing.created_at.desc()).all()
+    if status_filter:
+        query = query.filter(Listing.status == status_filter)
+    if category_id:
+        try:
+            query = query.filter(Listing.category_id == int(category_id))
+        except ValueError:
+            return jsonify({'error': 'Invalid category filter'}), 400
+    if min_price:
+        try:
+            query = query.filter(Listing.price >= float(min_price))
+        except ValueError:
+            return jsonify({'error': 'Invalid min_price filter'}), 400
+    if max_price:
+        try:
+            query = query.filter(Listing.price <= float(max_price))
+        except ValueError:
+            return jsonify({'error': 'Invalid max_price filter'}), 400
+    if sort_by == 'price_low':
+        query = query.order_by(Listing.price.asc(), Listing.created_at.desc())
+    elif sort_by == 'price_high':
+        query = query.order_by(Listing.price.desc(), Listing.created_at.desc())
+    else:
+        query = query.order_by(Listing.created_at.desc())
+    listings = query.all()
     return jsonify({'listings': [l.to_dict() for l in listings]}), 200
 
 @app.route('/api/listings', methods=['POST'])
@@ -383,14 +560,12 @@ def get_listings():
 def create_listing():
     try:
         user_id = int(get_jwt_identity())
-        print(f"Creating listing for user {user_id}")
         title = request.form.get('title')
         price = request.form.get('price')
         condition = request.form.get('condition')
         category_id = request.form.get('category_id')
         description = request.form.get('description')
         image = request.files.get('image')
-        print(f"Received data: title={title}, price={price}, condition={condition}, category_id={category_id}")
         if not all([title, price, condition, category_id, description]):
             missing = []
             if not title: missing.append('title')
@@ -398,7 +573,8 @@ def create_listing():
             if not condition: missing.append('condition')
             if not category_id: missing.append('category_id')
             if not description: missing.append('description')
-            return jsonify({'error': f'Missing required fields: {', '.join(missing)}'}), 400
+            missing_fields = ', '.join(missing)
+            return jsonify({'error': f"Missing required fields: {missing_fields}"}), 400
         try:
             price = float(price)
             condition = int(condition)
@@ -407,21 +583,18 @@ def create_listing():
             return jsonify({'error': 'Invalid price, condition, or category ID format'}), 400
         listing = Listing(
             title=title,
-            price=price,
+            price=price,    
             condition=condition,
             category_id=category_id,
             description=description,
             seller_id=user_id
         )
         if image:
-            filename = secure_filename(f"listing_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{image.filename}")
-            image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            image.save(image_path)
-            listing.image = f"/uploads/{filename}"
-            print(f"Image uploaded: {filename}")
+            image_url = upload_image_helper(image, prefix="listing")
+            if image_url:
+                listing.image = image_url
         db.session.add(listing)
         db.session.commit()
-        print(f"Listing created successfully with ID: {listing.id}")
         return jsonify({
             'message': 'Listing created successfully',
             'listing': listing.to_dict()
@@ -447,13 +620,86 @@ def get_listing(listing_id):
         print(f"Error fetching listing {listing_id}: {str(e)}")
         return jsonify({'error': 'Failed to fetch listing'}), 500
 
+@app.route('/api/listings/<int:listing_id>/mark-sold', methods=['PUT'])
+@jwt_required()
+def mark_listing_sold(listing_id):
+    try:
+        user_id = int(get_jwt_identity())
+        listing = Listing.query.get(listing_id)
+        if not listing:
+            return jsonify({'error': 'Listing not found'}), 404
+        
+        # Only the seller can mark their listing as sold
+        if listing.seller_id != user_id:
+            return jsonify({'error': 'Unauthorized. Only the seller can mark this listing as sold'}), 403
+        
+        listing.status = 'sold'
+        db.session.commit()
+        return jsonify({'message': 'Listing marked as sold', 'listing': listing.to_dict()}), 200
+    except Exception as e:
+        print(f"Error marking listing as sold: {str(e)}")
+        db.session.rollback()
+        return jsonify({'error': 'Failed to mark listing as sold'}), 500
+
 # --- Static file serving ---
+@app.route('/favicon.ico')
+def favicon():
+    """Serve favicon - use logo.png as favicon for legacy browser support"""
+    return send_from_directory('static/images', 'logo.png', mimetype='image/png')
+
 @app.route('/')
 def index():
-    return send_from_directory('.', 'index.html')
+    return send_from_directory('templates', 'index.html')
+
+@app.route('/index.html')
+def index_html():
+    return send_from_directory('templates', 'index.html')
+
+@app.route('/listing.html')
+def listing():
+    return send_from_directory('templates', 'listing.html')
+
+@app.route('/about.html')
+def about():
+    return send_from_directory('templates', 'about.html')
+
+@app.route('/login.html')
+def login_page():
+    return send_from_directory('templates', 'login.html')
+
+@app.route('/register.html')
+def register_page():
+    return send_from_directory('templates', 'register.html')
+
+@app.route('/profile.html')
+def profile_page():
+    return send_from_directory('templates', 'profile.html')
+
+@app.route('/create-listing.html')
+def create_listing_page():
+    return send_from_directory('templates', 'create-listing.html')
+
+@app.route('/messages.html')
+def messages_page():
+    return send_from_directory('templates', 'messages.html')
+
+@app.route('/admin.html')
+def admin_page():
+    return send_from_directory('templates', 'admin.html')
+
+@app.route('/partials/<path:filename>')
+def serve_partials(filename):
+    """Serve partial templates (navbar, footer, etc.)"""
+    return send_from_directory('templates/partials', filename)
 
 @app.route('/<path:path>')
 def serve_static(path):
+    # Serve HTML files from templates folder (including subdirectories like partials/)
+    if path.endswith('.html'):
+        # Normalize path separators
+        normalized_path = path.replace('\\', '/')
+        return send_from_directory('templates', normalized_path)
+    # Serve all other files from root
     return send_from_directory('.', path)
 
 # --- Chat Endpoints ---
@@ -473,11 +719,28 @@ def get_threads():
             ((Message.sender_id == uid) & (Message.receiver_id == user_id))
         ).order_by(Message.created_at.desc()).first()
         if msg:
+            unread_count = Message.query.filter(
+                (Message.sender_id == uid) &
+                (Message.receiver_id == user_id) &
+                (Message.is_read.is_(False))
+            ).count()
             threads.append({
                 'user_id': uid,
-                'last_message': msg.to_dict()
+                'last_message': msg.to_dict(),
+                'unread_count': unread_count
             })
     return jsonify({'threads': threads}), 200
+
+@app.route('/api/messages/unread-count', methods=['GET'])
+@jwt_required()
+def get_unread_count():
+    """Get total count of unread messages for the current user"""
+    user_id = int(get_jwt_identity())
+    unread_count = Message.query.filter(
+        (Message.receiver_id == user_id) &
+        (Message.is_read.is_(False))
+    ).count()
+    return jsonify({'unread_count': unread_count}), 200
 
 @app.route('/api/messages/<int:other_user_id>', methods=['GET'])
 @jwt_required()
@@ -487,6 +750,15 @@ def get_messages_with_user(other_user_id):
         ((Message.sender_id == user_id) & (Message.receiver_id == other_user_id)) |
         ((Message.sender_id == other_user_id) & (Message.receiver_id == user_id))
     ).order_by(Message.created_at.asc()).all()
+    # Mark received messages as read
+    updated = False
+    for msg in messages:
+        if msg.receiver_id == user_id and not msg.is_read:
+            msg.is_read = True
+            updated = True
+    if updated:
+        db.session.commit()
+        notify_read_receipt(user_id, other_user_id)
     return jsonify({'messages': [m.to_dict() for m in messages]}), 200
 
 @app.route('/api/messages/<int:other_user_id>', methods=['POST'])
@@ -495,30 +767,100 @@ def send_message(other_user_id):
     user_id = int(get_jwt_identity())
     data = request.get_json()
     content = data.get('content', '').strip()
+    listing_id = data.get('listing_id')
     if not content:
         return jsonify({'error': 'Message content required'}), 400
-    msg = Message(sender_id=user_id, receiver_id=other_user_id, content=content)
+    msg = Message(sender_id=user_id, receiver_id=other_user_id, content=content, listing_id=listing_id)
     db.session.add(msg)
     db.session.commit()
-    return jsonify({'message': msg.to_dict()}), 201
+    payload = {'message': msg.to_dict()}
+    socketio.emit('new_message', payload, room=f"user_{user_id}")
+    socketio.emit('new_message', payload, room=f"user_{other_user_id}")
+    return jsonify({'message': payload['message']}), 201
+
+
+# --- Transaction Endpoints ---
+def _get_listing_for_transaction(listing_id):
+    listing = Listing.query.get(listing_id)
+    if not listing:
+        return None, jsonify({'error': 'Listing not found'}), 404
+    return listing, None, None
+
+
+@app.route('/api/transactions', methods=['POST'])
+@jwt_required()
+def create_transaction():
+    try:
+        user_id = int(get_jwt_identity())
+        data = request.get_json() or {}
+        listing_id = data.get('listing_id')
+        if not listing_id:
+            return jsonify({'error': 'listing_id required'}), 400
+        listing, error_response, status_code = _get_listing_for_transaction(listing_id)
+        if error_response:
+            return error_response, status_code
+        if listing.seller_id == user_id:
+            return jsonify({'error': 'Sellers cannot purchase their own listings'}), 400
+        if listing.status != 'available':
+            return jsonify({'error': 'Listing is not available for purchase'}), 400
+
+        amount = data.get('amount', listing.price)
+        try:
+            amount = float(amount)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Invalid amount'}), 400
+
+        transaction = Transaction(
+            buyer_id=user_id,
+            seller_id=listing.seller_id,
+            listing_id=listing.id,
+            amount=amount,
+            status=data.get('status', 'completed'),
+            payment_status=data.get('payment_status', 'paid')
+        )
+
+        listing.sold = True
+        listing.status = 'sold'
+        db.session.add(transaction)
+        db.session.commit()
+
+        return jsonify({'message': 'Transaction recorded', 'transaction': transaction.to_dict()}), 201
+    except Exception as e:
+        print(f"Error creating transaction: {str(e)}")
+        db.session.rollback()
+        return jsonify({'error': 'Failed to record transaction'}), 500
+
+
+@app.route('/api/transactions', methods=['GET'])
+@jwt_required()
+def get_transactions():
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+        scope = request.args.get('scope', 'user')
+        query = Transaction.query.order_by(Transaction.created_at.desc())
+        if is_admin(user) and scope == 'all':
+            transactions = query.all()
+        else:
+            transactions = query.filter(
+                or_(Transaction.buyer_id == user_id, Transaction.seller_id == user_id)
+            ).all()
+        return jsonify({'transactions': [t.to_dict() for t in transactions]}), 200
+    except Exception as e:
+        print(f"Error fetching transactions: {str(e)}")
+        return jsonify({'error': 'Failed to fetch transactions'}), 500
 
 @app.route('/api/categories', methods=['GET'])
 @app.route('/api/categories/', methods=['GET'])  # Handle both with and without trailing slash
 def get_categories():
     try:
-        print("Attempting to fetch categories...")
         categories = Category.query.all()
-        print(f"Found {len(categories)} categories")
         if not categories:
-            print("No categories found, initializing default categories...")
             init_default_categories()
             categories = Category.query.all()
         return jsonify({'categories': [c.to_dict() for c in categories]}), 200
     except Exception as e:
         print(f"Error fetching categories: {str(e)}")
-        import traceback
-        print("Full traceback:")
-        print(traceback.format_exc())
         return jsonify({'error': 'Failed to fetch categories'}), 500
 
 @app.route('/uploads/<filename>')
@@ -526,8 +868,11 @@ def uploaded_file(filename):
     try:
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         if not os.path.exists(file_path):
-            # For profile images, redirect to a placeholder avatar
+            # For profile images, serve default profile image
             if filename.startswith('profile_'):
+                default_profile = os.path.join('static', 'images', 'default.png')
+                if os.path.exists(default_profile):
+                    return send_from_directory('static/images', 'default.png')
                 return redirect('https://via.placeholder.com/150?text=User')
             # For listing images, serve a default listing image
             return send_from_directory(app.config['UPLOAD_FOLDER'], 'default-listing.png')
@@ -547,18 +892,59 @@ def upload_profile_image():
         image = request.files.get('image')
         if not image:
             return jsonify({'error': 'No image uploaded'}), 400
-        filename = secure_filename(f"profile_{user_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{image.filename}")
-        image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        image.save(image_path)
-        user.profile_image = f"/uploads/{filename}"
-        db.session.commit()
-        return jsonify({'message': 'Profile image updated', 'profile_image': user.profile_image}), 200
+        image_url = upload_image_helper(image, prefix=f"profile_{user_id}")
+        if image_url:
+            user.profile_image = image_url
+            db.session.commit()
+            return jsonify({'message': 'Profile image updated', 'profile_image': user.profile_image}), 200
+        else:
+            return jsonify({'error': 'Failed to upload profile image'}), 500
     except Exception as e:
         print(f"Error uploading profile image: {str(e)}")
         import traceback
         print("Full traceback:")
         print(traceback.format_exc())
         return jsonify({'error': 'Failed to upload profile image'}), 500
+
+
+@app.route('/api/profile', methods=['PUT'])
+@jwt_required()
+def update_profile():
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        data = request.get_json() or {}
+
+        full_name = data.get('full_name')
+        phone = data.get('phone')
+        current_password = data.get('current_password')
+        new_password = data.get('new_password')
+
+        if full_name:
+            user.full_name = full_name.strip()
+
+        if phone:
+            if not validate_phone(phone):
+                return jsonify({'error': 'Please provide an 11-digit phone number.'}), 400
+            user.phone = phone
+
+        if new_password:
+            if not current_password or not user.check_password(current_password):
+                return jsonify({'error': 'Current password is incorrect.'}), 400
+            if len(new_password) < 8 or not re.search(r'[^A-Za-z0-9]', new_password) or not re.search(r'\d', new_password):
+                return jsonify({'error': 'New password must be at least 8 characters long and include a number and special character.'}), 400
+            user.password = bcrypt.generate_password_hash(new_password).decode('utf-8')
+
+        db.session.commit()
+        return jsonify({'message': 'Profile updated successfully', 'user': user.to_dict()}), 200
+    except Exception as e:
+        print(f"Error updating profile: {str(e)}")
+        db.session.rollback()
+        return jsonify({'error': 'Failed to update profile'}), 500
+
 
 @app.route('/api/users/<int:user_id>', methods=['GET'])
 def get_user(user_id):
@@ -579,7 +965,7 @@ def admin_get_listings():
         # Check if user is admin
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
-        if not user or user.email != 'k232004@nu.edu.pk':
+        if not is_admin(user):
             return jsonify({'error': 'Unauthorized'}), 403
 
         # Pagination
@@ -604,7 +990,7 @@ def admin_delete_listing(listing_id):
         # Check if user is admin
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
-        if not user or user.email != 'k232004@nu.edu.pk':
+        if not is_admin(user):
             return jsonify({'error': 'Unauthorized'}), 403
 
         listing = Listing.query.get(listing_id)
@@ -621,6 +1007,12 @@ def admin_delete_listing(listing_id):
                 print(f"Error deleting image: {str(e)}")
 
         db.session.delete(listing)
+        record_admin_action(
+            admin_id=user_id,
+            action_type='delete_listing',
+            description=f"Deleted listing #{listing.id}",
+            target_listing_id=listing.id
+        )
         db.session.commit()
         return jsonify({'message': 'Listing deleted successfully'}), 200
     except Exception as e:
@@ -634,7 +1026,7 @@ def admin_get_users():
         # Check if user is admin
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
-        if not user or user.email != 'k232004@nu.edu.pk':
+        if not is_admin(user):
             return jsonify({'error': 'Unauthorized'}), 403
 
         # Pagination
@@ -652,6 +1044,22 @@ def admin_get_users():
         print(f"Error fetching users: {str(e)}")
         return jsonify({'error': 'Failed to fetch users'}), 500
 
+@app.route('/api/admin/actions', methods=['GET'])
+@jwt_required()
+def admin_get_actions():
+    try:
+        admin_id = int(get_jwt_identity())
+        admin = User.query.get(admin_id)
+        if not is_admin(admin):
+            return jsonify({'error': 'Unauthorized'}), 403
+        limit = int(request.args.get('limit', 50))
+        actions = AdminAction.query.order_by(AdminAction.created_at.desc()).limit(limit).all()
+        return jsonify({'actions': [a.to_dict() for a in actions]}), 200
+    except Exception as e:
+        print(f"Error fetching admin actions: {str(e)}")
+        return jsonify({'error': 'Failed to fetch admin actions'}), 500
+
+
 @app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
 @jwt_required()
 def admin_delete_user(user_id):
@@ -659,7 +1067,7 @@ def admin_delete_user(user_id):
         # Check if user is admin
         admin_id = int(get_jwt_identity())
         admin = User.query.get(admin_id)
-        if not admin or admin.email != 'k232004@nu.edu.pk':
+        if not is_admin(admin):
             return jsonify({'error': 'Unauthorized'}), 403
 
         user = User.query.get(user_id)
@@ -676,6 +1084,12 @@ def admin_delete_user(user_id):
                 print(f"Error deleting image: {str(e)}")
 
         db.session.delete(user)
+        record_admin_action(
+            admin_id=admin_id,
+            action_type='delete_user',
+            description=f"Deleted user #{user.id}",
+            target_user_id=user.id
+        )
         db.session.commit()
         return jsonify({'message': 'User deleted successfully'}), 200
     except Exception as e:
@@ -693,6 +1107,34 @@ def get_profile_stats():
         'soldCount': sold_count
     }), 200
 
+@app.route('/api/stats', methods=['GET'])
+def get_stats():
+    """Get public stats for homepage"""
+    try:
+        # Get actual counts from database
+        active_listings = Listing.query.filter_by(status='available').count()
+        total_users = User.query.filter_by(is_verified=True).count()
+        
+        # Calculate weekly trades (transactions from last 7 days)
+        week_ago = datetime.utcnow() - timedelta(days=7)
+        weekly_trades = Transaction.query.filter(Transaction.created_at >= week_ago).count()
+        
+        # Return realistic stats (use actual if available, otherwise show minimums)
+        return jsonify({
+            'listings': max(active_listings, 50),
+            'users': max(total_users, 30),
+            'trades': max(weekly_trades, 10)
+        }), 200
+    except Exception as e:
+        print(f"Error fetching stats: {str(e)}")
+        # Return default realistic stats if database query fails
+        return jsonify({
+            'listings': 50,
+            'users': 30,
+            'trades': 10
+        }), 200
+
+
 @app.errorhandler(Exception)
 def handle_exception(e):
     import traceback
@@ -701,4 +1143,4 @@ def handle_exception(e):
 
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000) 
+    socketio.run(app, debug=True, host='0.0.0.0', port=5000)

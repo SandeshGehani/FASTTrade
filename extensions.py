@@ -3,6 +3,7 @@ from flask_migrate import Migrate
 from flask_bcrypt import Bcrypt
 from flask_jwt_extended import JWTManager
 from flask_mail import Mail
+from flask_socketio import SocketIO
 import os
 from dotenv import load_dotenv
 
@@ -15,12 +16,14 @@ migrate = Migrate()
 bcrypt = Bcrypt()
 jwt = JWTManager()
 mail = Mail()
+socketio = SocketIO(cors_allowed_origins="*")
 
 def init_extensions(app):
     db.init_app(app)
     migrate.init_app(app, db)
     bcrypt.init_app(app)
     jwt.init_app(app)
+    socketio.init_app(app, cors_allowed_origins="*")
     
     # Configure Flask-Mail
     app.config['MAIL_SERVER'] = 'smtp.gmail.com'

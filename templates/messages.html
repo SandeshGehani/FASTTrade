@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FASTTrade - Messages</title>
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo.svg">
+    <link rel="icon" type="image/png" href="/static/images/logo.png">
+    <link rel="shortcut icon" href="/favicon.ico">
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/messages.css">
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- AOS for scroll animations -->
+    <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
+    <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
+</head>
+<body>
+    <div id="navbar"></div>
+    <div x-data="{ mobileMenuOpen: false, profileDropdownOpen: false, contactsOpen: true }">
+
+        <!-- Main Content -->
+        <main class="main-content" x-data="messagesData()" x-init="init()">
+            <div class="messages-container">
+                <!-- Contacts List -->
+                <aside class="contacts-panel">
+                    <div class="contacts-header">
+                        <h3>Chats</h3>
+                    </div>
+                    <div class="contacts-search">
+                        <div class="input-container">
+                            <i class="fas fa-search input-icon"></i>
+                            <input type="text" placeholder="Search contacts..." x-model="searchQuery" @input="searchContacts">
+                        </div>
+                    </div>
+                    <div class="contacts-list">
+                        <template x-for="contact in filteredContacts" :key="contact.id">
+                            <div class="contact-item" :class="{ 'active': selectedContact && selectedContact.id === contact.id }" @click="selectContact(contact)">
+                                <div class="contact-avatar">
+                                    <img :src="contact.avatar" :alt="contact.name">
+                                </div>
+                                <div class="contact-info">
+                                    <h4 class="contact-name" x-text="contact.name"></h4>
+                                    <p class="contact-last-message" x-text="contact.lastMessage"></p>
+                                </div>
+                                <div class="contact-meta">
+                                    <span class="message-time" x-text="contact.lastMessageTime"></span>
+                                    <template x-if="contact.unreadCount > 0">
+                                        <span class="unread-count" x-text="contact.unreadCount"></span>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                    <div class="empty-contacts" x-show="filteredContacts.length === 0">
+                        <i class="fas fa-search empty-icon"></i>
+                        <p>No contacts found</p>
+                    </div>
+                </aside>
+                <!-- Chat Window -->
+                <section class="chat-window">
+                    <template x-if="errorMessage">
+                        <div class="chat-error">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <h3>Error</h3>
+                            <p x-text="errorMessage"></p>
+                        </div>
+                    </template>
+                    <template x-if="!errorMessage && selectedContact">
+                        <div class="chat-container">
+                            <div class="chat-header">
+                                <div class="chat-contact-info">
+                                    <div class="contact-avatar large">
+                                        <img :src="selectedContact.avatar" :alt="selectedContact.name">
+                                    </div>
+                                    <div class="contact-details">
+                                        <h4 class="contact-name" x-text="selectedContact.name"></h4>
+                                        <p class="contact-batch" x-text="selectedContact.batch"></p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Product Info Card -->
+                            <div class="product-info-card" x-show="selectedProduct">
+                                <div class="product-card-content">
+                                    <div class="product-card-image">
+                                        <img :src="selectedProduct.image || 'https://via.placeholder.com/150'" :alt="selectedProduct.title">
+                                    </div>
+                                    <div class="product-card-details">
+                                        <h5 class="product-card-title" x-text="selectedProduct.title"></h5>
+                                        <p class="product-card-price" x-text="'Rs. ' + selectedProduct.price.toLocaleString()"></p>
+                                        <div class="product-card-status">
+                                            <span class="status-badge" :class="'status-' + selectedProduct.status" x-text="selectedProduct.status === 'sold' ? 'Sold' : 'Available'"></span>
+                                            <span class="product-card-condition" x-text="'Condition: ' + selectedProduct.condition + '/10'"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="product-card-actions" x-show="isSeller && selectedProduct.status !== 'sold'">
+                                    <button class="btn btn-primary btn-sm" @click="markAsSold">
+                                        <i class="fas fa-check-circle"></i> Mark as Sold
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div class="chat-messages" id="chat-messages" x-ref="messagesContainer">
+                                <template x-for="message in messages" :key="message.id || message.time">
+                                    <div class="message-row" :class="{ 'sent': message.sent, 'received': !message.sent }">
+                                        <div class="message-bubble">
+                                            <span class="message-text" x-text="message.text"></span>
+                                            <span class="message-time" x-text="message.time"></span>
+                                            <span class="message-status" x-show="message.sent" x-text="message.read ? 'Seen' : 'Sent'"></span>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                            <div class="chat-input-bar">
+                                <input type="text" class="chat-input-field" placeholder="Type a message..." x-model="newMessage" @keyup.enter="sendMessage">
+                                <button class="chat-input-btn send-btn" @click="sendMessage" :disabled="!newMessage.trim()"><i class="fas fa-paper-plane"></i></button>
+                            </div>
+                        </div>
+                    </template>
+                    <template x-if="!selectedContact && !errorMessage">
+                        <div class="chat-placeholder">
+                            <i class="fas fa-comments fa-3x"></i>
+                            <h3>Select a contact to start chatting</h3>
+                    </div>
+                    </template>
+                </section>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <div id="footer"></div>
+    </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            // Initialize AOS
+            AOS.init({
+                duration: 800,
+                easing: 'ease-out',
+                once: true
+            });
+        });
+    </script>
+    <script src="js/auth.js"></script>
+    <script src="js/toast.js"></script>
+    <script src="js/navbar.js"></script>
+    <script src="js/footer.js"></script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" integrity="sha384-Jg2V1srO2Qd6hwMRyYB9H9n1tFoZT3zh0+BTtPlqvGjufH6G+jD/adJzi10BGSA7" crossorigin="anonymous"></script>
+    <script src="js/messages.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            await auth.init();
+            auth.requireLogin();
+        });
+    </script>
+</body>
+</html>
