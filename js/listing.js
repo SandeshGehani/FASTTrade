@@ -1,91 +1,146 @@
 // Marketplace page functionality
+if (typeof window !== 'undefined' && !window.setListingSearchTerm) {
+  window.setListingSearchTerm = () => {};
+}
+
 function marketplaceData() {
   return {
-    // Sorting
+    // Sorting & pagination
     sortOption: "newest",
-
-    // Pagination
     currentPage: 1,
-    itemsPerPage: 8,
+    itemsPerPage: 9,
 
     // Modal state
     detailsModalOpen: false,
     selectedItem: null,
 
-    // Real listings data
+    // Data
     listings: [],
+    categories: [],
+    isLoading: false,
+    error: null,
+
+    // Filtering & search
+    searchTerm: '',
+    filters: {
+      status: '',
+      category: '',
+      minPrice: '',
+      maxPrice: ''
+    },
+    statusOptions: [
+      { value: '', label: 'All statuses' },
+      { value: 'available', label: 'Available' },
+      { value: 'sold', label: 'Sold' },
+      { value: 'removed', label: 'Removed' }
+    ],
 
     // Handle Add Listing button click
     handleAddListingClick() {
-      const token = localStorage.getItem('access_token');
-      if (!token) {
-        const currentPath = window.location.pathname;
-        // Only redirect if we're not already on the login page
-        if (!window.location.pathname.includes('login.html')) {
-          window.location.href = `login.html?next=${encodeURIComponent(currentPath)}`;
-        }
-        return;
-      }
+      if (!auth.requireLogin({ next: 'create-listing.html' })) return;
       window.location.href = 'create-listing.html';
+    },
+
+    buildQueryParams() {
+      const params = new URLSearchParams();
+      if (this.searchTerm.trim()) params.append('search', this.searchTerm.trim());
+      if (this.filters.status) params.append('status', this.filters.status);
+      if (this.filters.category) params.append('category_id', this.filters.category);
+      if (this.filters.minPrice) params.append('min_price', this.filters.minPrice);
+      if (this.filters.maxPrice) params.append('max_price', this.filters.maxPrice);
+
+      if (this.sortOption === 'price_low') {
+        params.append('sort_by', 'price_low');
+      } else if (this.sortOption === 'price_high') {
+        params.append('sort_by', 'price_high');
+      } else {
+        params.append('sort_by', 'newest');
+      }
+      return params.toString();
     },
 
     async fetchListings() {
       try {
-        const res = await fetch(`/api/listings?sort_by=${this.sortOption}`);
+        this.isLoading = true;
+        this.error = null;
+        const query = this.buildQueryParams();
+        const res = await fetch(`/api/listings?${query}`);
+        if (!res.ok) throw new Error('Failed to fetch listings');
         const data = await res.json();
         this.listings = data.listings || [];
       } catch (e) {
         console.error('Failed to fetch listings:', e);
+        this.error = 'Unable to load listings right now.';
         this.listings = [];
+      } finally {
+        this.isLoading = false;
       }
     },
 
-    // Computed property for filtered listings
-    get filteredListings() {
-      const result = [...this.listings];
-      // Apply pagination
+    async fetchCategories() {
+      try {
+        const res = await fetch('/api/categories');
+        const data = await res.json();
+        this.categories = data.categories || [];
+      } catch (e) {
+        console.error('Failed to fetch categories:', e);
+        this.categories = [];
+      }
+    },
+
+    get paginatedListings() {
       const startIndex = (this.currentPage - 1) * this.itemsPerPage;
       const endIndex = startIndex + this.itemsPerPage;
-      return result.slice(startIndex, endIndex);
+      return this.listings.slice(startIndex, endIndex);
     },
 
-    // Computed property for total pages
     get totalPages() {
-      return Math.ceil(this.listings.length / this.itemsPerPage);
+      return Math.max(1, Math.ceil(this.listings.length / this.itemsPerPage) || 1);
     },
 
-    // Sort listings
     sortListings() {
       this.currentPage = 1;
       this.fetchListings();
     },
 
-    // Pagination methods
+    applyFilters() {
+      this.currentPage = 1;
+      this.fetchListings();
+    },
+
+    resetFilters() {
+      this.filters = { status: '', category: '', minPrice: '', maxPrice: '' };
+      this.applyFilters();
+    },
+
+    updateSearchTerm(term) {
+      this.searchTerm = term;
+      this.currentPage = 1;
+      this.fetchListings();
+    },
+
     nextPage() {
       if (this.currentPage < this.totalPages) {
         this.currentPage++;
-        window.scrollTo(0, 0);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       }
     },
 
     prevPage() {
       if (this.currentPage > 1) {
         this.currentPage--;
-        window.scrollTo(0, 0);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       }
     },
 
-    // Require login before viewing details or messaging
     requireLogin(action) {
-      if (!localStorage.getItem('access_token')) {
-        const currentPath = window.location.pathname;
-        window.location.href = `login.html?next=${encodeURIComponent(currentPath)}`;
-        return false;
+      const ok = auth.requireLogin();
+      if (ok && typeof action === 'function') {
+        action();
       }
-      return action();
+      return ok;
     },
 
-    // Open details modal with login check
     openDetailsModal(item) {
       this.requireLogin(() => {
         this.selectedItem = item;
@@ -99,24 +154,42 @@ function marketplaceData() {
       });
     },
 
-    // Go to details page with login check
     goToDetails(item) {
       this.requireLogin(() => {
         this.openDetailsModal(item);
       });
     },
 
-    // Message seller with login check
     messageSeller(item) {
       this.requireLogin(() => {
-        // Redirect to messages page with seller's ID and product ID
         window.location.href = `messages.html?user_id=${item.seller_id}&product_id=${item.id}`;
       });
     },
 
-    // Init
+    formatStatus(status) {
+      const mapping = {
+        available: 'Available',
+        sold: 'Sold',
+        removed: 'Removed'
+      };
+      return mapping[status] || 'Unknown';
+    },
+
+    categoryLabel(categoryId) {
+      if (!categoryId) return 'General';
+      const match = this.categories.find(cat => Number(cat.id) === Number(categoryId));
+      return match ? match.name : 'General';
+    },
+
+    initSearchBridge() {
+      window.setListingSearchTerm = (term) => {
+        this.updateSearchTerm(term || '');
+      };
+    },
+
     async init() {
-      await this.fetchListings();
+      await Promise.all([this.fetchCategories(), this.fetchListings()]);
+      this.initSearchBridge();
     },
   };
 }
@@ -138,13 +211,12 @@ function listingData() {
         isSubmitting: false,
         
         async init() {
-            // Fetch seller rating if user is logged in
-            if (localStorage.getItem('access_token')) {
+            await auth.init();
+            const { token } = auth.getState();
+            if (token) {
                 try {
                     const res = await fetch('/api/user/rating', {
-                        headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-                        }
+                        headers: { 'Authorization': `Bearer ${token}` }
                     });
                     if (res.ok) {
                         const data = await res.json();
@@ -170,13 +242,13 @@ function listingData() {
             for (const file of files) {
                 // Validate file type
                 if (!file.type.startsWith('image/')) {
-                    alert('Only image files are allowed');
+                    toast?.show?.('Only image files are allowed', 'error');
                     continue;
                 }
                 
                 // Validate file size (max 5MB)
                 if (file.size > 5 * 1024 * 1024) {
-                    alert('Image size must be less than 5MB');
+                    toast?.show?.('Image size must be less than 5MB', 'error');
                     continue;
                 }
                 
@@ -204,19 +276,26 @@ function listingData() {
             
             // Validate required fields
             if (!this.title || !this.description || !this.price || !this.category || !this.conditionRating) {
-                alert('Please fill in all required fields');
+                toast?.show?.('Please fill in all required fields', 'error');
                 return;
             }
             
             // Validate images
             if (this.images.length === 0) {
-                alert('Please upload at least one image');
+                toast?.show?.('Please upload at least one image', 'error');
                 return;
             }
             
             this.isSubmitting = true;
             
             try {
+                await auth.init();
+                if (!auth.requireLogin()) {
+                    this.isSubmitting = false;
+                    return;
+                }
+                const { token } = auth.getState();
+
                 // Create FormData for multipart/form-data
                 const formData = new FormData();
                 formData.append('title', this.title);
@@ -233,7 +312,7 @@ function listingData() {
                 const res = await fetch('/api/listings', {
                     method: 'POST',
                     headers: {
-                        'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+                        'Authorization': `Bearer ${token}`
                     },
                     body: formData
                 });
@@ -244,10 +323,10 @@ function listingData() {
                 
                 // Redirect to the new listing page
                 const data = await res.json();
-                window.location.href = `/listing-detail.html?id=${data.id}`;
+                window.location.href = `listing.html?id=${data.id}`;
             } catch (err) {
                 console.error('Error creating listing:', err);
-                alert('Failed to create listing. Please try again.');
+                toast?.show?.('Failed to create listing. Please try again.', 'error');
             } finally {
                 this.isSubmitting = false;
             }

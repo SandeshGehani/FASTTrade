@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FASTTrade - About Us</title>
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo.svg">
+    <link rel="icon" type="image/png" href="/static/images/logo.png">
+    <link rel="shortcut icon" href="/favicon.ico">
     <link rel="stylesheet" href="css/styles.css">
     <link rel="stylesheet" href="css/about.css">
     <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
@@ -13,61 +16,21 @@
     <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
 </head>
 <body>
-    <div x-data="{ mobileMenuOpen: false, profileDropdownOpen: false, activeTab: 'about', loggedIn: !!localStorage.getItem('access_token') }">
-        <!-- Navigation Bar -->
-        <nav class="navbar">
-            <div class="navbar-container">
-                <div class="navbar-logo">
-                    <a href="index.html">
-                        <svg width="150" height="30" viewBox="0 0 500 200" xmlns="http://www.w3.org/2000/svg" class="logo-svg">
-                            <text x="140" y="165" font-family="Arial" font-size="108" font-weight="bold">
-                                <tspan fill="#F9F9F9">FAST</tspan><tspan fill="#CEC0FF">Trade</tspan><tspan fill="#F9F9F9">.</tspan>
-                            </text>
-                        </svg>
-                    </a>
-                </div>
-                
-                <!-- Mobile menu button -->
-                <button class="mobile-menu-button" @click="mobileMenuOpen = !mobileMenuOpen">
-                    <i class="fas fa-bars"></i>
-                </button>
-                
-                <!-- Desktop Navigation -->
-                <div class="navbar-links desktop-nav">
-                    <a href="index.html" class="nav-link">Home</a>
-                    <a href="listing.html" class="nav-link">Listing</a>
-                    <a href="about.html" class="nav-link active">About</a>
-                    <template x-if="loggedIn">
-                        <a href="profile.html" class="nav-link">Profile</a>
-                    </template>
-                </div>
-                
-                <!-- Profile Section -->
-                <div class="profile-section desktop-profile" x-data="{ loggedIn: !!localStorage.getItem('access_token'), profileDropdownOpen: false }">
-                    <template x-if="loggedIn">
-                        <div>
-                            <div class="profile-img-container" @click="profileDropdownOpen = !profileDropdownOpen">
-                                <img :src="localStorage.getItem('profile_image') || 'https://via.placeholder.com/40'" alt="Profile" class="profile-img">
-                            </div>
-                            <!-- Profile Dropdown -->
-                            <div x-show="profileDropdownOpen" @click.away="profileDropdownOpen = false" class="profile-dropdown">
-                                <a href="profile.html" class="dropdown-item">My Profile</a>
-                                <a href="messages.html" class="dropdown-item">Messages</a>
-                                <template x-if="localStorage.getItem('user_email') === 'k232004@nu.edu.pk'">
-                                    <a href="admin.html" class="dropdown-item">
-                                        <i class="fas fa-shield-alt"></i> Admin Panel
-                                    </a>
-                                </template>
-                                <a href="#" class="dropdown-item" @click="localStorage.clear(); window.location.href='index.html'">Logout</a>
-                            </div>
-                        </div>
-                    </template>
-                    <template x-if="!loggedIn">
-                        <button class="btn btn-primary" @click="window.location.href='login.html'">Join</button>
-                    </template>
-                </div>
-            </div>
-        </nav>
+    <div id="navbar"></div>
+    <div x-data="{ 
+        mobileMenuOpen: false, 
+        profileDropdownOpen: false, 
+        activeTab: 'about', 
+        loggedIn: !!localStorage.getItem('access_token'),
+        activeFaq: null,
+        toggleFaq(index) {
+            if (this.activeFaq === index) {
+                this.activeFaq = null;
+            } else {
+                this.activeFaq = index;
+            }
+        }
+    }">
 
         <!-- Main Content -->
         <main class="main-content">
@@ -85,7 +48,7 @@
                     <div class="team-grid">
                         <div class="team-card" data-aos="fade-up">
                             <div class="team-avatar">
-                                <img src="img/sandesh.jpg" alt="Sandesh Gehani">
+                                <img src="static/images/sandesh.jpg" alt="Sandesh Gehani">
                             </div>
                             <h3>Sandesh Kumar</h3>
                             <p class="team-role">Founder & Developer</p>
@@ -96,26 +59,19 @@
                         </div>
                         <div class="team-card" data-aos="fade-up">
                             <div class="team-avatar">
-                                <img src="img/sandesh.jpg" alt="Sandesh Gehani">
+                                <img src="static/images/naseer.jpg" alt="Naseer Usman Khan">
                             </div>
-                            <h3>Sandesh Kumar</h3>
+                            <h3>Naseer Usman khan</h3>
                             <p class="team-role">Founder & Developer</p>
                             <div class="team-social">
                                 <a href="https://www.linkedin.com/in/sandesh-kumar7/" target="_blank"><i class="fab fa-linkedin"></i></a>
                                 <a href="https://www.instagram.com/sandeshgehanii/" target="_blank"><i class="fab fa-instagram"></i></a>
                             </div>
                         </div>
-                        <div class="team-card" data-aos="fade-up">
-                            <div class="team-avatar">
-                                <img src="img/sandesh.jpg" alt="Sandesh Gehani">
-                            </div>
-                            <h3>Sandesh Kumar</h3>
-                            <p class="team-role">Founder & Developer</p>
-                            <div class="team-social">
-                                <a href="https://www.linkedin.com/in/sandesh-kumar7/" target="_blank"><i class="fab fa-linkedin"></i></a>
-                                <a href="https://www.instagram.com/sandeshgehanii/" target="_blank"><i class="fab fa-instagram"></i></a>
-                            </div>
-                        </div>
+                        
+                        
+                        
+                        
                     </div>
                 </section>
                 
@@ -157,8 +113,8 @@
                 <section class="faq-section">
                     <h2>Frequently Asked Questions</h2>
                     <div class="faq-container">
-                        <div class="faq-item" data-aos="fade-up">
-                            <div class="faq-question" @click="toggleFaq($el)">
+                        <div class="faq-item" :class="{ 'active': activeFaq === 0 }" data-aos="fade-up">
+                            <div class="faq-question" @click="toggleFaq(0)">
                                 <h3>How do I create a listing?</h3>
                                 <i class="fas fa-chevron-down"></i>
                             </div>
@@ -166,8 +122,8 @@
                                 <p>To create a listing, click on the "Create Listing" button in the navigation bar. Fill in the required details about your item, add photos, and set your price. Once submitted, your listing will be reviewed and published.</p>
                             </div>
                         </div>
-                        <div class="faq-item" data-aos="fade-up">
-                            <div class="faq-question" @click="toggleFaq($el)">
+                        <div class="faq-item" :class="{ 'active': activeFaq === 1 }" data-aos="fade-up">
+                            <div class="faq-question" @click="toggleFaq(1)">
                                 <h3>Is FASTTrade only for FAST-NUCES students?</h3>
                                 <i class="fas fa-chevron-down"></i>
                             </div>
@@ -175,8 +131,8 @@
                                 <p>Yes, FASTTrade is exclusively for FAST-NUCES students. You need a valid FAST email address to register and use the platform.</p>
                             </div>
                         </div>
-                        <div class="faq-item" data-aos="fade-up">
-                            <div class="faq-question" @click="toggleFaq($el)">
+                        <div class="faq-item" :class="{ 'active': activeFaq === 2 }" data-aos="fade-up">
+                            <div class="faq-question" @click="toggleFaq(2)">
                                 <h3>How do I contact a seller?</h3>
                                 <i class="fas fa-chevron-down"></i>
                             </div>
@@ -190,24 +146,7 @@
         </main>
 
         <!-- Footer -->
-        <footer class="footer">
-            <div class="footer-container">
-                <div class="footer-logo">
-                    <svg width="150" height="30" viewBox="0 0 500 200" xmlns="http://www.w3.org/2000/svg" class="logo-svg">
-                        <text x="-80" y="165" font-family="Arial" font-size="148" font-weight="bold">
-                            <tspan fill="#F9F9F9">FAST</tspan><tspan fill="#CEC0FF">Trade</tspan><tspan fill="#F9F9F9">.</tspan>
-                        </text>
-                    </svg>
-                </div>
-                <div class="footer-social">
-                    <a href="https://www.linkedin.com/in/sandesh-kumar7/" class="social-link" target="_blank"><i class="fab fa-linkedin"></i></a>
-                    <a href="https://www.instagram.com/sandeshgehanii/" class="social-link" target="_blank"><i class="fab fa-instagram"></i></a>
-                </div>
-            </div>
-            <div class="footer-bottom">
-                <p>&copy; 2025 FASTTrade. All right are reserved | Sandesh - 23K-2004</p>
-            </div>
-        </footer>
+        <div id="footer"></div>
     </div>
 
     <script>
@@ -220,14 +159,10 @@
             });
         });
     </script>
+    <script src="js/auth.js"></script>
+    <script src="js/toast.js"></script>
+    <script src="js/navbar.js"></script>
+    <script src="js/footer.js"></script>
     <script src="js/about.js"></script>
-    <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      var img = document.querySelector('.profile-img');
-      if (img) {
-        img.src = localStorage.getItem('profile_image') || 'https://via.placeholder.com/40';
-      }
-        });
-    </script>
 </body>
 </html>

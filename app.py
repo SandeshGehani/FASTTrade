@@ -1,704 +1,467 @@
+import os
 import re
 import random
 import string
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify, send_from_directory, redirect
-from flask_sqlalchemy import SQLAlchemy
-from flask_bcrypt import Bcrypt
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
-from flask_cors import CORS
-import os
-from werkzeug.utils import secure_filename
-from werkzeug.security import generate_password_hash
-from flask_mail import Mail
-from flask_mail import Message as MailMessage
-from extensions import mail, init_extensions
+from typing import List, Optional
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+import socketio
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
 
-# --- Flask App Setup ---
-app = Flask(__name__, static_folder='.', static_url_path='')
-CORS(app)
+from config import Config
+from extensions import get_db, SessionLocal, engine, Base
+from models import User, Category, Listing, Message, Transaction, AdminAction
+import schemas
+from auth import (
+    get_password_hash,
+    verify_password,
+    create_access_token,
+    get_current_user,
+    get_admin_user,
+    get_current_user_from_token
+)
 
-# --- Config ---
-app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{os.path.join(os.path.abspath(os.path.dirname(__file__)), "instance", "fasttrade.db")}'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['JWT_SECRET_KEY'] = 'YL6Y6eGXY2vons4yQXerpgJIHa-pV601WX4RDRKR-_U'
-app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
-app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=30)
-UPLOAD_FOLDER = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'uploads')
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app = FastAPI(title="FASTTrade API")
 
-# --- Extensions ---
-from extensions import init_extensions, db, bcrypt, jwt
-init_extensions(app)
+# Setup CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# --- Models ---
-class User(db.Model):
-    __tablename__ = 'users'
-    id = db.Column(db.Integer, primary_key=True)
-    full_name = db.Column(db.String(100), nullable=False)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    password = db.Column(db.String(128), nullable=False)
-    phone = db.Column(db.String(20), nullable=False)
-    profile_image = db.Column(db.String(255), nullable=True)
-    is_verified = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)
 
-    def check_password(self, plaintext_password):
-        return bcrypt.check_password_hash(self.password, plaintext_password)
+Base.metadata.create_all(bind=engine)
 
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'full_name': self.full_name,
-            'email': self.email,
-            'phone': self.phone,
-            'profile_image': self.profile_image,
-            'is_verified': self.is_verified,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
-        }
+# Setup Socket.IO
+sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
+socket_app = socketio.ASGIApp(sio, other_asgi_app=app)
 
-class Category(db.Model):
-    __tablename__ = 'categories'
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(50), nullable=False, unique=True)
-    listings = db.relationship('Listing', backref='category', lazy=True)
-    def to_dict(self):
-        return {'id': self.id, 'name': self.name}
+@sio.on('connect')
+async def connect(sid, environ):
+    pass
 
-class Listing(db.Model):
-    __tablename__ = 'listings'
-    id = db.Column(db.Integer, primary_key=True)
-    title = db.Column(db.String(200), nullable=False)
-    description = db.Column(db.Text, nullable=False)
-    price = db.Column(db.Float, nullable=False)
-    image = db.Column(db.String(255), nullable=True)
-    condition = db.Column(db.Integer, nullable=False)
-    seller_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    category_id = db.Column(db.Integer, db.ForeignKey('categories.id'), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    sold = db.Column(db.Boolean, default=False)
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'title': self.title,
-            'description': self.description,
-            'price': self.price,
-            'image': self.image if self.image else '/uploads/default-listing.png',
-            'condition': self.condition,
-            'seller_id': self.seller_id,
-            'category_id': self.category_id,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
-            'sold': self.sold
-        }
-
-class Message(db.Model):
-    __tablename__ = 'messages'
-    id = db.Column(db.Integer, primary_key=True)
-    sender_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    receiver_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    content = db.Column(db.Text, nullable=False)
-    read = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'sender_id': self.sender_id,
-            'receiver_id': self.receiver_id,
-            'content': self.content,
-            'read': self.read,
-            'created_at': self.created_at.isoformat() if self.created_at else None
-        }
-
-# --- Validators ---
-def validate_email(email):
-    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    return bool(re.match(pattern, email))
-
-def validate_password(password):
-    return True  # Accept any password for demo
-
-def validate_phone(phone):
-    pattern = r'^[0-9]{11}$'
-    return bool(re.match(pattern, phone))
-
-# --- OTP/Email Logic (no real email sending for demo) ---
-otp_storage = {}
-def generate_otp(length=6):
-    return ''.join(random.choices(string.digits, k=length))
-def send_verification_email(email, otp):
+@sio.on('join')
+async def handle_join(sid, data):
+    token = data.get('token')
+    if not token:
+        await sio.emit('socket_error', {'message': 'Missing token'}, room=sid)
+        return
+    db = SessionLocal()
     try:
-        print("Attempting to send email...")
-        print("MAIL_USERNAME:", os.getenv("MAIL_USERNAME"))
-        print("MAIL_PASSWORD:", "***" if os.getenv("MAIL_PASSWORD") else "Not set")
-        
-        msg = MailMessage(
-            'Your FASTTrade Verification Code',
-            recipients=[email],
-            body=f"Your verification code is: {otp}\n\nEnter this code to verify your email on FASTTrade.\nIf you did not request this, please ignore this email."
-        )
-        mail.send(msg)
-        otp_storage[email] = {
-            'otp': otp,
-            'expires_at': datetime.utcnow() + timedelta(minutes=10)
-        }
-        print(f"Sent OTP to {email}: {otp}")
-        return True
-    except Exception as e:
-        print(f"Failed to send verification email to {email}: {e}")
-        import traceback
-        print("Full traceback:")
-        print(traceback.format_exc())
-        return False
-def verify_otp(email, otp):
-    if email not in otp_storage:
-        return False
-    stored = otp_storage[email]
-    if datetime.utcnow() > stored['expires_at']:
-        del otp_storage[email]
-        return False
-    if stored['otp'] == otp:
-        del otp_storage[email]
-        return True
-    return False
+        user = get_current_user_from_token(token, db)
+        sio.enter_room(sid, f"user_{user.id}")
+        await sio.emit('socket_ready', {'message': 'Connected', 'user_id': user.id}, room=sid)
+    except Exception as exc:
+        await sio.emit('socket_error', {'message': 'Authentication failed', 'details': str(exc)}, room=sid)
+        await sio.disconnect(sid)
+    finally:
+        db.close()
 
-def resend_otp(email):
-    if email in otp_storage:
-        del otp_storage[email]
-    new_otp = generate_otp()
-    return send_verification_email(email, new_otp)
 
-def init_default_categories():
-    try:
-        existing_categories = Category.query.all()
-        if not existing_categories:
-            if app.config.get('DEBUG'):
-                print("Initializing default categories...")
-            default_categories = [
-                'Electronics',
-                'Clothing',
-                'Books',
-                'Home & Garden',
-                'Sports & Outdoors',
-                'Toys & Games',
-                'Automotive',
-                'Health & Beauty'
-            ]
-            
-            for category_name in default_categories:
-                if not Category.query.filter_by(name=category_name).first():
-                    category = Category(name=category_name)
-                    db.session.add(category)
-            
-            db.session.commit()
-            if app.config.get('DEBUG'):
-                print("Categories initialization completed")
-        elif app.config.get('DEBUG'):
-            print(f"Found {len(existing_categories)} existing categories")
-    except Exception as e:
-        if app.config.get('DEBUG'):
-            print(f"Error initializing categories: {str(e)}")
-            import traceback
-            print("Full traceback:")
-            print(traceback.format_exc())
-        db.session.rollback()
+def validate_email(email: str):
+    return bool(re.match(r'^[a-zA-Z0-9._%+-]+@nu\.edu\.pk$', email))
 
-def insert_test_users():
-    if not User.query.filter_by(email='user1@nu.edu.pk').first():
-        user1 = User(
-            full_name='Test User One',
-            email='user1@nu.edu.pk',
-            password=bcrypt.generate_password_hash('password1').decode('utf-8'),
-            phone='03001234567',
-            profile_image=None,
-            is_verified=True
-        )
-        db.session.add(user1)
+# ---- Routes ----
+
+@app.post("/api/auth/register", status_code=status.HTTP_201_CREATED)
+def register(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
+    if not validate_email(user_data.email):
+        raise HTTPException(status_code=400, detail="Only FAST-NUCES emails (@nu.edu.pk) are allowed.")
     
-    if not User.query.filter_by(email='user2@nu.edu.pk').first():
-        user2 = User(
-            full_name='Test User Two',
-            email='user2@nu.edu.pk',
-            password=bcrypt.generate_password_hash('password2').decode('utf-8'),
-            phone='03007654321',
-            profile_image=None,
-            is_verified=True
-        )
-        db.session.add(user2)
+    password = user_data.password
+    if len(password) < 8 or not re.search(r'[^A-Za-z0-9]', password) or not re.search(r'\d', password):
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters long, contain a number and a special character.")
     
-    db.session.commit()
-    if app.config.get('DEBUG'):
-        print('Test users inserted.')
+    if db.query(User).filter(User.email == user_data.email).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    role = "student" if user_data.role not in ["student", "faculty"] else user_data.role
+    
+    hashed_password = get_password_hash(user_data.password)
+    new_user = User(
+        full_name=user_data.full_name,
+        email=user_data.email,
+        password=hashed_password,
+        phone=user_data.phone,
+        role=role,
+        is_verified=True # Auto verifying for demo
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    
+    return {"message": "Registration successful", "user": new_user.to_dict()}
 
-# --- DB Init ---
-def init_db():
-    with app.app_context():
-        db.create_all()
-        init_default_categories()
-        insert_test_users()
 
-init_db()
-
-# --- Auth Endpoints ---
-@app.route('/api/auth/register', methods=['POST'])
-def register():
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'No data provided'}), 400
-
-        # Validate required fields
-        required_fields = ['full_name', 'email', 'password', 'phone']
-        for field in required_fields:
-            if field not in data:
-                return jsonify({'error': f'Missing required field: {field}'}), 400
-
-        # Email domain validation
-        if not data['email'].endswith('@nu.edu.pk'):
-            return jsonify({'error': 'Only FAST-NUCES emails (@nu.edu.pk) are allowed.'}), 400
-
-        # Password strength validation
-        password = data['password']
-        if len(password) < 8:
-            return jsonify({'error': 'Password must be at least 8 characters long.'}), 400
-        if not re.search(r'[^A-Za-z0-9]', password):
-            return jsonify({'error': 'Password must contain at least one special character.'}), 400
-        if not re.search(r'\d', password):
-            return jsonify({'error': 'Password must contain at least one number.'}), 400
-
-        # Check if email already exists
-        if User.query.filter_by(email=data['email']).first():
-            return jsonify({'error': 'Email already registered'}), 400
-
-        # Create new user
-        hashed_password = bcrypt.generate_password_hash(data['password']).decode('utf-8')
-        new_user = User(
-            full_name=data['full_name'],
-            email=data['email'],
-            password=hashed_password,
-            phone=data['phone'],
-            is_verified=False  # User is not verified until OTP is entered
-        )
-
-        db.session.add(new_user)
-        db.session.commit()
-
-        # Generate and send OTP
-        otp = generate_otp()
-        if not send_verification_email(data['email'], otp):
-            return jsonify({'error': 'Failed to send verification email'}), 500
-
-        return jsonify({
-            'message': 'Registration successful. Please check your email for verification code.',
-            'user': new_user.to_dict()
-        }), 201
-
-    except Exception as e:
-        print(f"Error in registration: {str(e)}")
-        return jsonify({'error': 'Registration failed'}), 500
-
-@app.route('/api/auth/login', methods=['POST'])
-def login():
-    data = request.get_json()
-    print('Login attempt:', data)
-    if not data or 'email' not in data or 'password' not in data:
-        print('Missing email or password')
-        return jsonify({'error': 'Email and password are required'}), 400
-    user = User.query.filter_by(email=data['email']).first()
-    if not user:
-        print('User not found:', data['email'])
-        return jsonify({'error': 'Invalid email or password'}), 401
-    if not user.check_password(data['password']):
-        print('Invalid password for:', data['email'])
-        return jsonify({'error': 'Invalid email or password'}), 401
+@app.post("/api/auth/login")
+def login(login_data: schemas.UserLogin, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == login_data.email).first()
+    if not user or not verify_password(login_data.password, user.password):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    
     if not user.is_verified:
-        print('User not verified:', data['email'])
-        return jsonify({'error': 'Please verify your email first'}), 403
-    access_token = create_access_token(identity=str(user.id))
-    print('Login successful for:', data['email'])
-    return jsonify({
-        'message': 'Login successful',
-        'user': user.to_dict(),
-        'access_token': access_token
-    }), 200
+        raise HTTPException(status_code=403, detail="Please verify your email first")
+    
+    access_token = create_access_token(data={"sub": str(user.id)})
+    return {
+        "message": "Login successful",
+        "user": user.to_dict(),
+        "access_token": access_token
+    }
 
-@app.route('/api/auth/me', methods=['GET'])
-@jwt_required()
-def get_current_user():
-    user_id = get_jwt_identity()
-    user = User.query.get(int(user_id))
+
+@app.get("/api/auth/me")
+def get_user_me(current_user: User = Depends(get_current_user)):
+    return {"user": current_user.to_dict()}
+
+@app.post("/api/auth/verify-email")
+def verify_email(data: schemas.EmailVerification, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == data.email).first()
     if not user:
-        return jsonify({'error': 'User not found'}), 404
-    return jsonify({'user': user.to_dict()}), 200
+        raise HTTPException(status_code=404, detail="User not found")
+    user.is_verified = True
+    db.commit()
+    access_token = create_access_token(data={"sub": str(user.id)})
+    return {"message": "Email verified successfully", "user": user.to_dict(), "access_token": access_token}
 
-@app.route('/api/auth/verify-email', methods=['POST'])
-def verify_email():
-    try:
-        data = request.get_json()
-        if not data or 'email' not in data or 'otp' not in data:
-            return jsonify({'error': 'Email and OTP are required'}), 400
-        email = data['email']
-        otp = data['otp']
-        if not verify_otp(email, otp):
-            return jsonify({'error': 'Invalid or expired OTP'}), 400
-        user = User.query.filter_by(email=email).first()
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-        user.is_verified = True
-        db.session.commit()
-        access_token = create_access_token(identity=str(user.id))
-        refresh_token = create_access_token(identity=str(user.id))  # For demo, use same as access
-        return jsonify({
-            'message': 'Email verified successfully',
-            'user': user.to_dict(),
-            'access_token': access_token,
-            'refresh_token': refresh_token
-        }), 200
-    except Exception as e:
-        print(f"Error in verify_email: {str(e)}")
-        return jsonify({'error': 'Verification failed'}), 500
 
-# --- Listings Endpoint ---
-@app.route('/api/listings', methods=['GET'])
-@app.route('/api/listings/', methods=['GET'])
-def get_listings():
-    search = request.args.get('search', '').strip()
-    sort_by = request.args.get('sort_by', '').strip()
-    query = Listing.query
+@app.get("/api/listings")
+def get_listings(
+    search: Optional[str] = None, 
+    sort_by: Optional[str] = None, 
+    status: Optional[str] = None, 
+    category_id: Optional[int] = None, 
+    min_price: Optional[float] = None, 
+    max_price: Optional[float] = None,
+    db: Session = Depends(get_db)
+):
+    query = db.query(Listing).options(joinedload(Listing.seller)) # Optimization: Load seller eagerly
     if search:
-        query = query.filter(
-            (Listing.title.ilike(f'%{search}%')) |
-            (Listing.description.ilike(f'%{search}%'))
-        )
-    # Optionally handle sort_by param
-    listings = query.order_by(Listing.created_at.desc()).all()
-    return jsonify({'listings': [l.to_dict() for l in listings]}), 200
+        query = query.filter(or_(Listing.title.ilike(f"%{search}%"), Listing.description.ilike(f"%{search}%")))
+    if status is not None:
+        query = query.filter(Listing.status == status)
+    if category_id is not None:
+        query = query.filter(Listing.category_id == category_id)
+    if min_price is not None:
+        query = query.filter(Listing.price >= min_price)
+    if max_price is not None:
+        query = query.filter(Listing.price <= max_price)
+        
+    if sort_by == 'price_low':
+        query = query.order_by(Listing.price.asc(), Listing.created_at.desc())
+    elif sort_by == 'price_high':
+        query = query.order_by(Listing.price.desc(), Listing.created_at.desc())
+    else:
+        query = query.order_by(Listing.created_at.desc())
+        
+    listings = query.all()
+    return {"listings": [l.to_dict() for l in listings]}
 
-@app.route('/api/listings', methods=['POST'])
-@app.route('/api/listings/', methods=['POST'])
-@jwt_required()
-def create_listing():
-    try:
-        user_id = int(get_jwt_identity())
-        print(f"Creating listing for user {user_id}")
-        title = request.form.get('title')
-        price = request.form.get('price')
-        condition = request.form.get('condition')
-        category_id = request.form.get('category_id')
-        description = request.form.get('description')
-        image = request.files.get('image')
-        print(f"Received data: title={title}, price={price}, condition={condition}, category_id={category_id}")
-        if not all([title, price, condition, category_id, description]):
-            missing = []
-            if not title: missing.append('title')
-            if not price: missing.append('price')
-            if not condition: missing.append('condition')
-            if not category_id: missing.append('category_id')
-            if not description: missing.append('description')
-            return jsonify({'error': f'Missing required fields: {', '.join(missing)}'}), 400
-        try:
-            price = float(price)
-            condition = int(condition)
-            category_id = int(category_id)
-        except ValueError:
-            return jsonify({'error': 'Invalid price, condition, or category ID format'}), 400
-        listing = Listing(
-            title=title,
-            price=price,
-            condition=condition,
-            category_id=category_id,
-            description=description,
-            seller_id=user_id
-        )
-        if image:
-            filename = secure_filename(f"listing_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{image.filename}")
-            image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            image.save(image_path)
-            listing.image = f"/uploads/{filename}"
-            print(f"Image uploaded: {filename}")
-        db.session.add(listing)
-        db.session.commit()
-        print(f"Listing created successfully with ID: {listing.id}")
-        return jsonify({
-            'message': 'Listing created successfully',
-            'listing': listing.to_dict()
-        }), 201
-    except ValueError as e:
-        print(f"ValueError in create_listing: {str(e)}")
-        return jsonify({'error': 'Invalid input data'}), 400
-    except Exception as e:
-        print(f"Error creating listing: {str(e)}")
-        import traceback
-        print("Full traceback:")
-        print(traceback.format_exc())
-        return jsonify({'error': 'Failed to create listing'}), 500
 
-@app.route('/api/listings/<int:listing_id>', methods=['GET'])
-def get_listing(listing_id):
-    try:
-        listing = Listing.query.get(listing_id)
-        if not listing:
-            return jsonify({'error': 'Listing not found'}), 404
-        return jsonify({'listing': listing.to_dict()}), 200
-    except Exception as e:
-        print(f"Error fetching listing {listing_id}: {str(e)}")
-        return jsonify({'error': 'Failed to fetch listing'}), 500
+@app.post("/api/listings", status_code=status.HTTP_201_CREATED)
+async def create_listing(
+    title: str = Form(...),
+    price: float = Form(...),
+    condition: int = Form(...),
+    category_id: int = Form(...),
+    description: str = Form(...),
+    image: Optional[UploadFile] = File(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    listing = Listing(
+        title=title, price=price, condition=condition, 
+        category_id=category_id, description=description, seller_id=current_user.id
+    )
+    if image:
+        import shutil
+        filename = f"listing_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{image.filename}"
+        file_path = os.path.join(Config.UPLOAD_FOLDER, filename)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(image.file, buffer)
+        listing.image = f"/uploads/{filename}"
 
-# --- Static file serving ---
-@app.route('/')
-def index():
-    return send_from_directory('.', 'index.html')
+    db.add(listing)
+    db.commit()
+    db.refresh(listing)
+    return {"message": "Listing created successfully", "listing": listing.to_dict()}
 
-@app.route('/<path:path>')
-def serve_static(path):
-    return send_from_directory('.', path)
+@app.get("/api/listings/{listing_id}")
+def get_listing(listing_id: int, db: Session = Depends(get_db)):
+    listing = db.query(Listing).filter(Listing.id == listing_id).first()
+    if not listing:
+        raise HTTPException(status_code=404, detail="Listing not found")
+    return {"listing": listing.to_dict()}
 
-# --- Chat Endpoints ---
-@app.route('/api/messages/threads', methods=['GET'])
-@jwt_required()
-def get_threads():
-    user_id = int(get_jwt_identity())
-    sent = db.session.query(Message.receiver_id).filter_by(sender_id=user_id)
-    received = db.session.query(Message.sender_id).filter_by(receiver_id=user_id)
-    user_ids = set([uid for (uid,) in sent.union(received)])
+@app.put("/api/listings/{listing_id}/mark-sold")
+def mark_listing_sold(listing_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    listing = db.query(Listing).filter(Listing.id == listing_id).first()
+    if not listing:
+        raise HTTPException(status_code=404, detail="Listing not found")
+    if listing.seller_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    listing.status = 'sold'
+    listing.sold = True
+    db.commit()
+    return {"message": "Listing marked as sold", "listing": listing.to_dict()}
+
+
+@app.get("/api/messages/threads")
+def get_threads(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    sent = db.query(Message.receiver_id).filter(Message.sender_id == current_user.id)
+    received = db.query(Message.sender_id).filter(Message.receiver_id == current_user.id)
+    user_ids = set([uid for (uid,) in sent.union(received).all()])
+    
     threads = []
     for uid in user_ids:
-        if uid == user_id:
+        if uid == current_user.id:
             continue
-        msg = Message.query.filter(
-            ((Message.sender_id == user_id) & (Message.receiver_id == uid)) |
-            ((Message.sender_id == uid) & (Message.receiver_id == user_id))
+        msg = db.query(Message).filter(
+            or_(
+                (Message.sender_id == current_user.id) & (Message.receiver_id == uid),
+                (Message.sender_id == uid) & (Message.receiver_id == current_user.id)
+            )
         ).order_by(Message.created_at.desc()).first()
+        
         if msg:
+            unread_count = db.query(Message).filter(
+                Message.sender_id == uid,
+                Message.receiver_id == current_user.id,
+                Message.is_read == False
+            ).count()
             threads.append({
                 'user_id': uid,
-                'last_message': msg.to_dict()
+                'last_message': msg.to_dict(),
+                'unread_count': unread_count
             })
-    return jsonify({'threads': threads}), 200
+    return {"threads": threads}
 
-@app.route('/api/messages/<int:other_user_id>', methods=['GET'])
-@jwt_required()
-def get_messages_with_user(other_user_id):
-    user_id = int(get_jwt_identity())
-    messages = Message.query.filter(
-        ((Message.sender_id == user_id) & (Message.receiver_id == other_user_id)) |
-        ((Message.sender_id == other_user_id) & (Message.receiver_id == user_id))
+@app.get("/api/messages/unread-count")
+def get_unread_count(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    count = db.query(Message).filter(
+        Message.receiver_id == current_user.id,
+        Message.is_read == False
+    ).count()
+    return {"unread_count": count}
+
+@app.get("/api/messages/{other_user_id}")
+async def get_messages(other_user_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    messages = db.query(Message).filter(
+        or_(
+            (Message.sender_id == current_user.id) & (Message.receiver_id == other_user_id),
+            (Message.sender_id == other_user_id) & (Message.receiver_id == current_user.id)
+        )
     ).order_by(Message.created_at.asc()).all()
-    return jsonify({'messages': [m.to_dict() for m in messages]}), 200
+    
+    updated = False
+    for msg in messages:
+        if msg.receiver_id == current_user.id and not msg.is_read:
+            msg.is_read = True
+            updated = True
+    if updated:
+        db.commit()
+        await sio.emit('read_receipt', {'reader_id': current_user.id}, room=f"user_{other_user_id}")
+        
+    return {"messages": [m.to_dict() for m in messages]}
 
-@app.route('/api/messages/<int:other_user_id>', methods=['POST'])
-@jwt_required()
-def send_message(other_user_id):
-    user_id = int(get_jwt_identity())
-    data = request.get_json()
-    content = data.get('content', '').strip()
-    if not content:
-        return jsonify({'error': 'Message content required'}), 400
-    msg = Message(sender_id=user_id, receiver_id=other_user_id, content=content)
-    db.session.add(msg)
-    db.session.commit()
-    return jsonify({'message': msg.to_dict()}), 201
-
-@app.route('/api/categories', methods=['GET'])
-@app.route('/api/categories/', methods=['GET'])  # Handle both with and without trailing slash
-def get_categories():
-    try:
-        print("Attempting to fetch categories...")
-        categories = Category.query.all()
-        print(f"Found {len(categories)} categories")
-        if not categories:
-            print("No categories found, initializing default categories...")
-            init_default_categories()
-            categories = Category.query.all()
-        return jsonify({'categories': [c.to_dict() for c in categories]}), 200
-    except Exception as e:
-        print(f"Error fetching categories: {str(e)}")
-        import traceback
-        print("Full traceback:")
-        print(traceback.format_exc())
-        return jsonify({'error': 'Failed to fetch categories'}), 500
-
-@app.route('/uploads/<filename>')
-def uploaded_file(filename):
-    try:
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        if not os.path.exists(file_path):
-            # For profile images, redirect to a placeholder avatar
-            if filename.startswith('profile_'):
-                return redirect('https://via.placeholder.com/150?text=User')
-            # For listing images, serve a default listing image
-            return send_from_directory(app.config['UPLOAD_FOLDER'], 'default-listing.png')
-        return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
-    except Exception as e:
-        print(f"Error serving file {filename}: {str(e)}")
-        return jsonify({'error': 'File not found'}), 404
-
-@app.route('/api/profile/upload-image', methods=['POST'])
-@jwt_required()
-def upload_profile_image():
-    try:
-        user_id = int(get_jwt_identity())
-        user = User.query.get(user_id)
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-        image = request.files.get('image')
-        if not image:
-            return jsonify({'error': 'No image uploaded'}), 400
-        filename = secure_filename(f"profile_{user_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{image.filename}")
-        image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        image.save(image_path)
-        user.profile_image = f"/uploads/{filename}"
-        db.session.commit()
-        return jsonify({'message': 'Profile image updated', 'profile_image': user.profile_image}), 200
-    except Exception as e:
-        print(f"Error uploading profile image: {str(e)}")
-        import traceback
-        print("Full traceback:")
-        print(traceback.format_exc())
-        return jsonify({'error': 'Failed to upload profile image'}), 500
-
-@app.route('/api/users/<int:user_id>', methods=['GET'])
-def get_user(user_id):
-    try:
-        user = User.query.get(user_id)
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-        return jsonify({'user': user.to_dict()}), 200
-    except Exception as e:
-        print(f"Error fetching user: {str(e)}")
-        return jsonify({'error': 'Failed to fetch user'}), 500
-
-# --- Admin Endpoints ---
-@app.route('/api/admin/listings', methods=['GET'])
-@jwt_required()
-def admin_get_listings():
-    try:
-        # Check if user is admin
-        user_id = int(get_jwt_identity())
-        user = User.query.get(user_id)
-        if not user or user.email != 'k232004@nu.edu.pk':
-            return jsonify({'error': 'Unauthorized'}), 403
-
-        # Pagination
-        page = int(request.args.get('page', 1))
-        limit = int(request.args.get('limit', 10))
-        query = Listing.query.order_by(Listing.created_at.desc())
-        total = query.count()
-        listings = query.offset((page - 1) * limit).limit(limit).all()
-
-        return jsonify({
-            'listings': [l.to_dict() for l in listings],
-            'total': total
-        }), 200
-    except Exception as e:
-        print(f"Error fetching listings: {str(e)}")
-        return jsonify({'error': 'Failed to fetch listings'}), 500
-
-@app.route('/api/admin/listings/<int:listing_id>', methods=['DELETE'])
-@jwt_required()
-def admin_delete_listing(listing_id):
-    try:
-        # Check if user is admin
-        user_id = int(get_jwt_identity())
-        user = User.query.get(user_id)
-        if not user or user.email != 'k232004@nu.edu.pk':
-            return jsonify({'error': 'Unauthorized'}), 403
-
-        listing = Listing.query.get(listing_id)
-        if not listing:
-            return jsonify({'error': 'Listing not found'}), 404
-
-        # Delete the listing image if it exists
-        if listing.image:
-            try:
-                image_path = os.path.join(app.config['UPLOAD_FOLDER'], listing.image.split('/')[-1])
-                if os.path.exists(image_path):
-                    os.remove(image_path)
-            except Exception as e:
-                print(f"Error deleting image: {str(e)}")
-
-        db.session.delete(listing)
-        db.session.commit()
-        return jsonify({'message': 'Listing deleted successfully'}), 200
-    except Exception as e:
-        print(f"Error deleting listing: {str(e)}")
-        return jsonify({'error': 'Failed to delete listing'}), 500
-
-@app.route('/api/admin/users', methods=['GET'])
-@jwt_required()
-def admin_get_users():
-    try:
-        # Check if user is admin
-        user_id = int(get_jwt_identity())
-        user = User.query.get(user_id)
-        if not user or user.email != 'k232004@nu.edu.pk':
-            return jsonify({'error': 'Unauthorized'}), 403
-
-        # Pagination
-        page = int(request.args.get('page', 1))
-        limit = int(request.args.get('limit', 10))
-        query = User.query.order_by(User.created_at.desc())
-        total = query.count()
-        users = query.offset((page - 1) * limit).limit(limit).all()
-
-        return jsonify({
-            'users': [u.to_dict() for u in users],
-            'total': total
-        }), 200
-    except Exception as e:
-        print(f"Error fetching users: {str(e)}")
-        return jsonify({'error': 'Failed to fetch users'}), 500
-
-@app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
-@jwt_required()
-def admin_delete_user(user_id):
-    try:
-        # Check if user is admin
-        admin_id = int(get_jwt_identity())
-        admin = User.query.get(admin_id)
-        if not admin or admin.email != 'k232004@nu.edu.pk':
-            return jsonify({'error': 'Unauthorized'}), 403
-
-        user = User.query.get(user_id)
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-
-        # Delete user's profile image if it exists
-        if user.profile_image:
-            try:
-                image_path = os.path.join(app.config['UPLOAD_FOLDER'], user.profile_image.split('/')[-1])
-                if os.path.exists(image_path):
-                    os.remove(image_path)
-            except Exception as e:
-                print(f"Error deleting image: {str(e)}")
-
-        db.session.delete(user)
-        db.session.commit()
-        return jsonify({'message': 'User deleted successfully'}), 200
-    except Exception as e:
-        print(f"Error deleting user: {str(e)}")
-        return jsonify({'error': 'Failed to delete user'}), 500
-
-@app.route('/api/profile/stats', methods=['GET'])
-@jwt_required()
-def get_profile_stats():
-    user_id = int(get_jwt_identity())
-    listings_count = Listing.query.filter_by(seller_id=user_id).count()
-    sold_count = Listing.query.filter_by(seller_id=user_id, sold=True).count()
-    return jsonify({
-        'listingsCount': listings_count,
-        'soldCount': sold_count
-    }), 200
-
-@app.errorhandler(Exception)
-def handle_exception(e):
-    import traceback
-    print(traceback.format_exc())
-    return "Internal Server Error", 500
+@app.post("/api/messages/{other_user_id}", status_code=201)
+async def send_message(other_user_id: int, data: schemas.MessageCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    msg = Message(sender_id=current_user.id, receiver_id=other_user_id, content=data.content, listing_id=data.listing_id)
+    db.add(msg)
+    db.commit()
+    db.refresh(msg)
+    payload = {"message": msg.to_dict()}
+    await sio.emit('new_message', payload, room=f"user_{current_user.id}")
+    await sio.emit('new_message', payload, room=f"user_{other_user_id}")
+    return payload
 
 
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000) 
+@app.post("/api/transactions", status_code=201)
+def create_transaction(data: schemas.TransactionCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    listing = db.query(Listing).filter(Listing.id == data.listing_id).first()
+    if not listing:
+        raise HTTPException(status_code=404, detail="Listing not found")
+    if listing.seller_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Sellers cannot purchase their own listings")
+    if listing.status != 'available':
+        raise HTTPException(status_code=400, detail="Listing is not available for purchase")
+
+    amount = data.amount if data.amount is not None else listing.price
+    transaction = Transaction(
+        buyer_id=current_user.id,
+        seller_id=listing.seller_id,
+        listing_id=listing.id,
+        amount=amount,
+        status=data.status,
+        payment_status=data.payment_status
+    )
+    listing.sold = True
+    listing.status = 'sold'
+    db.add(transaction)
+    db.commit()
+    db.refresh(transaction)
+    return {"message": "Transaction recorded", "transaction": transaction.to_dict()}
+
+@app.get("/api/transactions")
+def get_transactions(scope: str = "user", current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    query = db.query(Transaction).order_by(Transaction.created_at.desc())
+    if current_user.role == "admin" and scope == "all":
+        pass
+    else:
+        query = query.filter(or_(Transaction.buyer_id == current_user.id, Transaction.seller_id == current_user.id))
+    return {"transactions": [t.to_dict() for t in query.all()]}
+
+@app.get("/api/categories")
+def get_categories(db: Session = Depends(get_db)):
+    categories = db.query(Category).all()
+    if not categories:
+        default_cats = [
+            {'name': 'Electronics', 'description': 'Phones, laptops, gadgets, accessories'},
+            {'name': 'Clothing', 'description': 'Apparel and wearable accessories'},
+            {'name': 'Books', 'description': 'Course books, novels, reference material'},
+            {'name': 'Home & Garden', 'description': 'Furniture, decor, and household items'},
+            {'name': 'Sports & Outdoors', 'description': 'Sports gear and outdoor equipment'},
+            {'name': 'Toys & Games', 'description': 'Games, collectibles, and hobby items'},
+            {'name': 'Automotive', 'description': 'Vehicle accessories and related items'},
+            {'name': 'Health & Beauty', 'description': 'Personal care and wellness products'}
+        ]
+        for c in default_cats:
+            db.add(Category(**c))
+        db.commit()
+        categories = db.query(Category).all()
+    return {"categories": [c.to_dict() for c in categories]}
+
+@app.post("/api/profile/upload-image")
+def upload_profile_image(
+    image: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    import shutil
+    filename = f"profile_{current_user.id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{image.filename}"
+    file_path = os.path.join(Config.UPLOAD_FOLDER, filename)
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(image.file, buffer)
+    current_user.profile_image = f"/uploads/{filename}"
+    db.commit()
+    return {"message": "Profile image updated", "profile_image": current_user.profile_image}
+
+@app.put("/api/profile")
+def update_profile(data: schemas.ProfileUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if data.full_name:
+        current_user.full_name = data.full_name.strip()
+    if data.phone:
+        current_user.phone = data.phone
+    if data.new_password:
+        if not data.current_password or not verify_password(data.current_password, current_user.password):
+            raise HTTPException(status_code=400, detail="Current password incorrect")
+        current_user.password = get_password_hash(data.new_password)
+    db.commit()
+    return {"message": "Profile updated successfully", "user": current_user.to_dict()}
+
+
+@app.get("/api/admin/listings")
+def admin_get_listings(page: int = 1, limit: int = 10, admin: User = Depends(get_admin_user), db: Session = Depends(get_db)):
+    query = db.query(Listing).order_by(Listing.created_at.desc())
+    total = query.count()
+    listings = query.offset((page - 1) * limit).limit(limit).all()
+    return {"listings": [l.to_dict() for l in listings], "total": total}
+
+@app.get("/api/admin/users")
+def admin_get_users(page: int = 1, limit: int = 10, admin: User = Depends(get_admin_user), db: Session = Depends(get_db)):
+    query = db.query(User).order_by(User.created_at.desc())
+    total = query.count()
+    users = query.offset((page - 1) * limit).limit(limit).all()
+    return {"users": [u.to_dict() for u in users], "total": total}
+
+@app.get("/api/admin/actions")
+def admin_get_actions(limit: int = 50, admin: User = Depends(get_admin_user), db: Session = Depends(get_db)):
+    actions = db.query(AdminAction).order_by(AdminAction.created_at.desc()).limit(limit).all()
+    return {"actions": [a.to_dict() for a in actions]}
+
+@app.delete("/api/admin/listings/{listing_id}")
+def admin_delete_listing(listing_id: int, admin: User = Depends(get_admin_user), db: Session = Depends(get_db)):
+    listing = db.query(Listing).filter(Listing.id == listing_id).first()
+    if not listing:
+        raise HTTPException(status_code=404, detail="Listing not found")
+    
+    if listing.image:
+        try:
+            os.remove(os.path.join(Config.UPLOAD_FOLDER, listing.image.split('/')[-1]))
+        except Exception:
+            pass
+            
+    db.delete(listing)
+    action = AdminAction(admin_id=admin.id, action_type='delete_listing', description=f"Deleted listing #{listing.id}", target_listing_id=listing.id)
+    db.add(action)
+    db.commit()
+    return {"message": "Listing deleted successfully"}
+
+@app.delete("/api/admin/users/{user_id}")
+def admin_delete_user(user_id: int, admin: User = Depends(get_admin_user), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.profile_image:
+        try:
+            os.remove(os.path.join(Config.UPLOAD_FOLDER, user.profile_image.split('/')[-1]))
+        except Exception:
+            pass
+
+    db.delete(user)
+    action = AdminAction(admin_id=admin.id, action_type='delete_user', description=f"Deleted user #{user.id}", target_user_id=user.id)
+    db.add(action)
+    db.commit()
+    return {"message": "User deleted successfully"}
+
+@app.get("/api/profile/stats")
+def get_profile_stats(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    listings_count = db.query(Listing).filter(Listing.seller_id == current_user.id).count()
+    sold_count = db.query(Listing).filter(Listing.seller_id == current_user.id, Listing.sold == True).count()
+    return {"listingsCount": listings_count, "soldCount": sold_count}
+
+@app.get("/api/stats")
+def get_stats(db: Session = Depends(get_db)):
+    active_listings = db.query(Listing).filter(Listing.status == 'available').count()
+    total_users = db.query(User).filter(User.is_verified == True).count()
+    week_ago = datetime.utcnow() - timedelta(days=7)
+    weekly_trades = db.query(Transaction).filter(Transaction.created_at >= week_ago).count()
+    return {"listings": max(active_listings, 50), "users": max(total_users, 30), "trades": max(weekly_trades, 10)}
+
+# Serving static files and uploads
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+app.mount("/css", StaticFiles(directory="css"), name="css")
+app.mount("/js", StaticFiles(directory="js"), name="js")
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/")
+def index():
+    return FileResponse("templates/index.html")
+
+@app.get("/{filename}.html")
+def html_pages(filename: str):
+    path = f"templates/{filename}.html"
+    if os.path.exists(path):
+        return FileResponse(path)
+    raise HTTPException(status_code=404)
+
+@app.get("/partials/{filename}.html")
+def partial_html(filename: str):
+    path = f"templates/partials/{filename}.html"
+    if os.path.exists(path):
+        return FileResponse(path)
+    raise HTTPException(status_code=404)
+
+if __name__ == "__main__":
+    import uvicorn
+    # uvicorn app:socket_app is what runs Socket.IO
+    uvicorn.run("app:socket_app", host="0.0.0.0", port=5000, reload=True)

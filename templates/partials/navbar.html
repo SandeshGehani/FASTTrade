@@ -1,0 +1,90 @@
+<nav class="navbar">
+  <div class="navbar-container">
+    <div class="navbar-logo">
+      <a href="index.html">
+        <svg width="150" height="30" viewBox="0 0 500 200" xmlns="http://www.w3.org/2000/svg" class="logo-svg">
+          <text x="140" y="165" font-family="Arial" font-size="108" font-weight="bold">
+            <tspan fill="#F9F9F9">FAST</tspan><tspan fill="#CEC0FF">Trade</tspan><tspan fill="#F9F9F9">.</tspan>
+          </text>
+        </svg>
+      </a>
+    </div>
+
+    <button class="mobile-menu-button" data-nav-toggle>
+      <i class="fas fa-bars"></i>
+    </button>
+
+    <div class="navbar-links desktop-nav">
+      <a href="index.html" class="nav-link" data-route="index">Home</a>
+      <a href="listing.html" class="nav-link" data-route="listing">Listing</a>
+      <a href="about.html" class="nav-link" data-route="about">About</a>
+      <a href="profile.html" class="nav-link" data-route="profile">Profile</a>
+    </div>
+
+    <div class="search-container desktop-search">
+      <div class="search-input-wrapper">
+        <input type="text" placeholder="Search for items..." class="search-input" data-nav-search-input>
+        <button class="search-button" data-nav-search-btn>
+          <i class="fas fa-search"></i>
+        </button>
+      </div>
+    </div>
+
+    <div class="profile-section desktop-profile">
+      <div class="nav-auth-section" data-auth-section="guest">
+        <button class="btn btn-primary" data-login-btn>Join</button>
+      </div>
+      <div class="nav-auth-section" data-auth-section="authenticated">
+        <button class="icon-button chat-icon" data-chat-button title="Messages" aria-label="Open messages">
+          <svg viewBox="0 0 24 24" role="img" aria-hidden="true">
+            <path d="M22 3L9.5 13.5" />
+            <path d="M22 3L14.5 21L9.5 13.5L2 9z" />
+          </svg>
+          <span class="notification-badge" data-unread-badge style="display: none;">0</span>
+        </button>
+        <div class="profile-img-container" data-profile-trigger>
+          <img src="https://via.placeholder.com/40" alt="Profile" class="profile-img" data-profile-image>
+        </div>
+        <div class="profile-dropdown" data-profile-dropdown>
+          <a href="profile.html" class="dropdown-item">My Profile</a>
+          <a href="messages.html" class="dropdown-item">Messages</a>
+          <a href="admin.html" class="dropdown-item" data-admin-link>
+            <i class="fas fa-shield-alt"></i> Admin Panel
+          </a>
+          <a href="#" class="dropdown-item" data-logout>Logout</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mobile-menu" data-mobile-menu>
+    <div class="search-container mobile-search">
+      <div class="search-input-wrapper">
+        <input type="text" placeholder="Search for items..." class="search-input" data-nav-search-input>
+        <button class="search-button" data-nav-search-btn>
+          <i class="fas fa-search"></i>
+        </button>
+      </div>
+    </div>
+    <div class="navbar-links mobile-nav">
+      <a href="index.html" class="nav-link" data-route="index">Home</a>
+      <a href="listing.html" class="nav-link" data-route="listing">Listing</a>
+      <a href="about.html" class="nav-link" data-route="about">About</a>
+      <a href="profile.html" class="nav-link" data-route="profile">Profile</a>
+      <a href="messages.html" class="nav-link" data-route="messages">Messages</a>
+    </div>
+    <div class="mobile-auth-section" data-mobile-section="guest">
+      <button class="btn btn-primary" data-login-btn>Join</button>
+    </div>
+    <div class="mobile-auth-section" data-mobile-section="authenticated">
+      <button class="btn btn-secondary" data-chat-button>
+        <i class="fas fa-comments"></i> Messages
+      </button>
+      <button class="btn btn-secondary" data-admin-link>
+        <i class="fas fa-shield-alt"></i> Admin Panel
+      </button>
+      <button class="btn btn-danger" data-logout>Logout</button>
+    </div>
+  </div>
+</nav>
+

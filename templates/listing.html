@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FASTTrade - Listing</title>
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo.svg">
+    <link rel="icon" type="image/png" href="/static/images/logo.png">
+    <link rel="shortcut icon" href="/favicon.ico">
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/listing.css">
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- AOS for scroll animations -->
+    <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
+    <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
+    <script>
+    if (!localStorage.getItem('access_token')) {
+        window.location.href = 'login.html?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+    }
+    </script>
+</head>
+<body>
+    <div id="navbar"></div>
+    <div x-data="{ mobileMenuOpen: false, profileDropdownOpen: false, detailsModalOpen: false, selectedItem: null }">
+
+        <!-- Main Content -->
+        <main class="main-content" x-data="marketplaceData()" x-init="init()">
+            <div class="marketplace-container">
+                <!-- Filters -->
+                <aside class="filters-panel">
+                    <div class="filters-header">
+                        <h3>Filter Listings</h3>
+                        <button class="filters-reset" @click="resetFilters">Reset</button>
+                    </div>
+                    <div class="filter-group">
+                        <label for="status-filter">Status</label>
+                        <select id="status-filter" x-model="filters.status" @change="applyFilters">
+                            <template x-for="option in statusOptions" :key="option.value">
+                                <option :value="option.value" x-text="option.label"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="category-filter">Category</label>
+                        <select id="category-filter" x-model="filters.category" @change="applyFilters">
+                            <option value="">All categories</option>
+                            <template x-for="category in categories" :key="category.id">
+                                <option :value="category.id" x-text="category.name"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Price Range (PKR)</label>
+                        <div class="price-inputs">
+                            <input type="number" min="0" placeholder="Min" x-model="filters.minPrice" @change="applyFilters">
+                            <span>—</span>
+                            <input type="number" min="0" placeholder="Max" x-model="filters.maxPrice" @change="applyFilters">
+                        </div>
+                    </div>
+                    <div class="filter-group">
+                        <label for="sort-filter">Sort by</label>
+                        <select id="sort-filter" x-model="sortOption" @change="sortListings">
+                            <option value="newest">Newest Listings</option>
+                            <option value="price_low">Price: Low to High</option>
+                            <option value="price_high">Price: High to Low</option>
+                        </select>
+                    </div>
+                </aside>
+
+                <!-- Listings Section -->
+                <section class="listings-section">
+                    <div class="listings-header">
+                        <div>
+                            <h2>Listings</h2>
+                            <p class="listings-count" x-text="`${listings.length} result(s)`"></p>
+                        </div>
+                        <div class="listings-actions">
+                            <button class="btn btn-primary add-listing-btn" @click="handleAddListingClick">
+                                <i class="fas fa-plus"></i> Add Listing
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="listings-grid">
+                        <template x-for="item in paginatedListings" :key="item.id">
+                            <div class="listing-card">
+                                <div class="listing-image">
+                                    <img :src="item.image" :alt="item.title" onerror="this.onerror=null;this.src='https://via.placeholder.com/300x200?text=No+Image';">
+                                    <span class="listing-condition" x-text="'Condition: ' + item.condition + '/10'"></span>
+                                    <span class="listing-status" :class="`status-${item.status}`" x-text="formatStatus(item.status)"></span>
+                                </div>
+                                <div class="listing-content">
+                                    <h3 class="listing-title" x-text="item.title"></h3>
+                                    <p class="listing-price" x-text="'Rs. ' + item.price.toLocaleString()"></p>
+                                    <p class="listing-category">
+                                        <i class="fas fa-tag"></i>
+                                        <span x-text="categoryLabel(item.category_id)"></span>
+                                    </p>
+                                    <p class="listing-seller">
+                                        <i class="fas fa-user"></i> <span x-text="item.seller_id"></span>
+                                    </p>
+                                    <div class="listing-actions">
+                                        <button class="btn btn-secondary btn-sm" @click="messageSeller(item)">
+                                            <i class="fas fa-comment"></i> Message
+                                        </button>
+                                        <button class="btn btn-primary btn-sm" @click="goToDetails(item)">
+                                            <i class="fas fa-info-circle"></i> Details
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- Loading & Empty States -->
+                    <div class="empty-state" x-show="isLoading">
+                        <i class="fas fa-spinner fa-spin empty-icon"></i>
+                        <h3>Loading listings...</h3>
+                    </div>
+                    <div class="empty-state" x-show="!isLoading && paginatedListings.length === 0">
+                        <i class="fas fa-search empty-icon"></i>
+                        <h3>No listings found</h3>
+                        <p>Try adjusting your filters or search keywords.</p>
+                    </div>
+
+                    <!-- Pagination -->
+                    <div class="pagination" x-show="!isLoading && listings.length > itemsPerPage">
+                        <button class="pagination-btn" :disabled="currentPage === 1" @click="prevPage">
+                            <i class="fas fa-chevron-left"></i> Previous
+                        </button>
+                        <div class="pagination-info">
+                            Page <span x-text="currentPage"></span> of <span x-text="totalPages"></span>
+                        </div>
+                        <button class="pagination-btn" :disabled="currentPage === totalPages" @click="nextPage">
+                            Next <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
+                </section>
+            </div>
+            
+            <!-- Item Details Modal -->
+            <div class="modal" x-show="detailsModalOpen" @click.self="detailsModalOpen = false">
+                <div class="modal-content" x-show="selectedItem">
+                    <span class="close-modal" @click="detailsModalOpen = false">&times;</span>
+                    <div class="modal-body">
+                        <div class="modal-image">
+                            <img :src="selectedItem?.image" :alt="selectedItem?.title">
+                        </div>
+                        <div class="modal-details">
+                            <h2 x-text="selectedItem?.title"></h2>
+                            <p class="modal-price" x-text="'Rs. ' + selectedItem?.price"></p>
+                            <p class="modal-condition" x-text="'Condition: ' + selectedItem?.condition + '/10'"></p>
+                            <p class="modal-seller">
+                                <i class="fas fa-user"></i> <span x-text="selectedItem?.seller"></span>
+                            </p>
+                            <p class="modal-description" x-text="selectedItem?.description">
+                                This is a detailed description of the item. The seller has provided this information to help you make an informed decision. Please contact the seller for more details.
+                            </p>
+                            <div class="modal-actions">
+                                <button class="btn btn-secondary" @click="messageSeller(selectedItem)">
+                                    <i class="fas fa-comment"></i> Message Seller
+                                </button>
+                                <button class="btn btn-primary">
+                                    <i class="fas fa-bookmark"></i> Save to Interests
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <div id="footer"></div>
+    </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            // Initialize AOS
+            AOS.init({
+                duration: 800,
+                easing: 'ease-out',
+                once: true
+            });
+
+            // Check authentication and handle redirection
+            const token = localStorage.getItem('access_token');
+            if (!token) {
+                const currentPath = window.location.pathname;
+                const nextParam = new URLSearchParams(window.location.search).get('next');
+                // Only redirect if we're not already on the login page
+                if (!window.location.pathname.includes('login.html')) {
+                    window.location.href = `login.html?next=${encodeURIComponent(currentPath)}`;
+                }
+            }
+        });
+    </script>
+    <script src="js/auth.js"></script>
+    <script src="js/toast.js"></script>
+    <script src="js/navbar.js"></script>
+    <script src="js/footer.js"></script>
+    <script src="js/listing.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            await auth.init();
+            auth.requireLogin();
+        });
+    </script>
+</body>
+</html>

@@ -1,46 +1,26 @@
-from flask_sqlalchemy import SQLAlchemy
-from flask_migrate import Migrate
-from flask_bcrypt import Bcrypt
-from flask_jwt_extended import JWTManager
-from flask_mail import Mail
 import os
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
+from config import Config
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
-# Initialize extensions
-db = SQLAlchemy()
-migrate = Migrate()
-bcrypt = Bcrypt()
-jwt = JWTManager()
-mail = Mail()
+# We use create_engine for synchronous connection since we are keeping sync DB for now.
+# pool_pre_ping is enabled in Config for stability.
+engine = create_engine(
+    Config.SQLALCHEMY_DATABASE_URI,
+    pool_pre_ping=Config.SQLALCHEMY_ENGINE_OPTIONS.get('pool_pre_ping', True),
+    pool_recycle=3600
+)
 
-def init_extensions(app):
-    db.init_app(app)
-    migrate.init_app(app, db)
-    bcrypt.init_app(app)
-    jwt.init_app(app)
-    
-    # Configure Flask-Mail
-    app.config['MAIL_SERVER'] = 'smtp.gmail.com'
-    app.config['MAIL_PORT'] = 587
-    app.config['MAIL_USE_TLS'] = True
-    app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
-    app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
-    app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_USERNAME')
-    
-    # Only log email config in development mode
-    if app.config.get('DEBUG'):
-        print("Email Configuration:")
-        print("MAIL_USERNAME:", app.config['MAIL_USERNAME'])
-        print("MAIL_PASSWORD:", "***" if app.config['MAIL_PASSWORD'] else "Not set")
-    
-    # Only initialize mail if credentials are provided
-    if app.config['MAIL_USERNAME'] and app.config['MAIL_PASSWORD']:
-        mail.init_app(app)
-        if app.config.get('DEBUG'):
-            print("Mail extension initialized successfully")
-    else:
-        if app.config.get('DEBUG'):
-            print("Warning: Email credentials not set. Email functionality will not work.")
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base = declarative_base()
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

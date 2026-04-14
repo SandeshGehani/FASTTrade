@@ -38,19 +38,21 @@ function profileData() {
     hasSpecial: false,
     hasMinLength: false,
 
+    async initProfile() {
+      await auth.init();
+      if (!auth.requireLogin()) return;
+      await this.fetchUserData();
+    },
+
     // Fetch user data from backend
     async fetchUserData() {
-      const token = localStorage.getItem('access_token');
-      console.log("Fetching user data with token:", token);
-
+      const { token } = auth.getState();
       if (!token) {
-        console.log("No access token found, redirecting to login");
-        window.location.href = '/login.html';
+        auth.requireLogin();
         return;
       }
 
       try {
-        console.log("Making request to /api/auth/me");
         const response = await fetch('/api/auth/me', {
           method: 'GET',
           headers: {
@@ -58,27 +60,21 @@ function profileData() {
           }
         });
 
-        console.log("Response status:", response.status);
         const data = await response.json();
-        console.log("Response data:", data);
 
         if (!response.ok) {
-          console.log("API request failed:", data.error);
           throw new Error(data.error || 'Failed to fetch user data');
         }
 
         if (data.user) {
-          console.log("User data received:", data.user);
           this.userData.fullName = data.user.full_name;
           this.userData.phone = data.user.phone;
           this.userData.email = data.user.email;
-          this.profileImage = data.user.profile_image || null;
-          // Update localStorage with latest info
+          this.profileImage = data.user.profile_image || 'static/images/default.png';
           localStorage.setItem('user', JSON.stringify(data.user));
           localStorage.setItem('profile_image', data.user.profile_image || '');
         } else {
-          console.log("No user data in response");
-          window.location.href = '/login.html';
+          auth.requireLogin();
         }
 
         // Fetch profile stats (listingsCount, soldCount)
@@ -95,7 +91,8 @@ function profileData() {
         }
       } catch (error) {
         console.error("Error fetching user data:", error);
-        window.location.href = '/login.html';
+        toast?.show?.(error.message || 'Failed to load profile.', 'error');
+        auth.requireLogin();
       }
     },
 
@@ -106,17 +103,21 @@ function profileData() {
 
     // Handle image upload
     async handleImageUpload(event) {
-      const file = event.target.files[0]
-      if (!file) return
+      const file = event.target.files[0];
+      if (!file) return;
 
       if (!file.type.startsWith("image/")) {
-        alert("Please select an image file")
-        return
+        toast?.show?.("Please select an image file", 'error');
+        return;
       }
 
       const formData = new FormData()
       formData.append('image', file)
-      const token = localStorage.getItem('access_token')
+      const { token } = auth.getState();
+      if (!token) {
+        auth.requireLogin();
+        return;
+      }
       try {
         const response = await fetch('/api/profile/upload-image', {
           method: 'POST',
@@ -127,11 +128,11 @@ function profileData() {
         })
         const data = await response.json()
         if (!response.ok) throw new Error(data.error || 'Failed to upload image')
-        this.profileImage = data.profile_image
+        this.profileImage = data.profile_image || 'static/images/default.png';
         localStorage.setItem('profile_image', data.profile_image || '');
-        alert('Profile image updated!')
+        toast?.show?.('Profile image updated!', 'success');
       } catch (error) {
-        alert(error.message)
+        toast?.show?.(error.message, 'error');
       }
     },
 
@@ -205,7 +206,7 @@ function profileData() {
     },
 
     // Save profile
-    saveProfile() {
+    async saveProfile() {
       this.validatePhone()
 
       if (this.userData.newPassword) {
@@ -214,25 +215,57 @@ function profileData() {
       }
 
       if (this.phoneError || this.passwordError || this.confirmPasswordError) {
+        toast?.show?.('Please fix the highlighted fields.', 'error');
         return
       }
 
       this.isSubmitting = true
 
-      // Simulate API call
-      setTimeout(() => {
-        console.log("Profile updated:", this.userData)
+      try {
+        await auth.init();
+        if (!auth.requireLogin()) {
+          this.isSubmitting = false;
+          return;
+        }
+        const { token } = auth.getState();
+        const payload = {
+          full_name: this.userData.fullName,
+          phone: this.userData.phone
+        };
+        if (this.userData.newPassword) {
+          payload.current_password = this.userData.currentPassword;
+          payload.new_password = this.userData.newPassword;
+        }
 
-        // Reset password fields
-        this.userData.currentPassword = ""
-        this.userData.newPassword = ""
-        this.userData.confirmPassword = ""
+        const response = await fetch('/api/profile', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(payload)
+        });
 
-        this.isSubmitting = false
+        const result = await response.json();
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to update profile');
+        }
 
-        // Show success message
-        alert("Profile updated successfully!")
-      }, 1500)
+        const updatedUser = result.user;
+        this.userData.fullName = updatedUser.full_name;
+        this.userData.phone = updatedUser.phone;
+        this.userData.email = updatedUser.email;
+        this.userData.currentPassword = "";
+        this.userData.newPassword = "";
+        this.userData.confirmPassword = "";
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+        toast?.show?.('Profile updated successfully!', 'success');
+      } catch (error) {
+        console.error('Profile update failed:', error);
+        toast?.show?.(error.message, 'error');
+      } finally {
+        this.isSubmitting = false;
+      }
     },
 
     // Reset form
@@ -256,10 +289,3 @@ function profileData() {
     },
   }
 }
-
-document.addEventListener('DOMContentLoaded', function() {
-  if (window.profileData) {
-    const pd = profileData();
-    pd.fetchUserData();
-  }
-});

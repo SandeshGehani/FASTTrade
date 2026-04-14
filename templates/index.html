@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FASTTrade - Home</title>
+    <link rel="icon" type="image/svg+xml" href="/static/images/logo.svg">
+    <link rel="icon" type="image/png" href="/static/images/logo.png">
+    <link rel="shortcut icon" href="/favicon.ico">
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/index.css">
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- AOS for scroll animations -->
+    <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
+    <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lozad/dist/lozad.min.js"></script>
+</head>
+<body>
+    <div id="navbar"></div>
+    <div x-data="{ ...indexData(), mobileMenuOpen: false, profileDropdownOpen: false }">
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <section class="hero-section page-shell">
+                <div class="hero-grid">
+                    <div class="hero-content">
+                        <div class="pill pill-accent">Campus Marketplace</div>
+                        <h1>Buy. Sell. Trade. <br><span class="highlight">Only at FAST.</span></h1>
+                        <p>The trusted marketplace built for FAST-NUCES students to safely exchange gadgets, books, and essentials.</p>
+                        <div class="hero-actions">
+                            <a href="listing.html" class="btn btn-primary">Explore Listings</a>
+                            <a href="create-listing.html" class="btn btn-ghost">Post an item</a>
+                        </div>
+                        <div class="hero-stats" x-data="{ 
+                            stats: { listings: 50, users: 30, trades: 10 }, 
+                            async fetchStats() { 
+                                try { 
+                                    const res = await fetch('/api/stats'); 
+                                    if (res.ok) { 
+                                        const data = await res.json(); 
+                                        this.stats = data; 
+                                    } 
+                                } catch(e) { 
+                                    console.error('Failed to fetch stats:', e); 
+                                } 
+                            } 
+                        }" x-init="fetchStats()">
+                            <div class="hero-stat-card">
+                                <span class="stat-label">Active listings</span>
+                                <strong x-text="stats.listings + '+'">50+</strong>
+                            </div>
+                            <div class="hero-stat-card">
+                                <span class="stat-label">Verified users</span>
+                                <strong x-text="stats.users + '+'">30+</strong>
+                            </div>
+                            <div class="hero-stat-card">
+                                <span class="stat-label">Weekly trades</span>
+                                <strong x-text="stats.trades + '+'">10+</strong>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="hero-visual">
+                        <div class="hero-orb"></div>
+                        <div class="hero-card glass-card">
+                            <p>Trusted by FAST students</p>
+                            <div class="avatar-stack">
+                                <span class="avatar avatar-one" title="Sandesh Kumar - Founder"></span>
+                                <span class="avatar avatar-two" title="Naseer Usman Khan - Founder"></span>
+                            </div>
+                            <small>Real-time chat, verified deals</small>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="featured-listings" class="featured-listings-section page-shell">
+                <div class="section-heading text-center">
+                    <div class="pill pill-accent">Fresh Drops</div>
+                    <h2>Featured Listings</h2>
+                    <p>Hand-picked items from the community. Browse trending gadgets, books, and campus essentials.</p>
+                </div>
+                <div class="listings-grid" x-data="{ 
+                    listings: [], 
+                    isLoading: false,
+                    error: null,
+                    async fetchListings() {
+                        this.isLoading = true;
+                        this.error = null;
+                        try {
+                            const response = await fetch('/api/listings');
+                            if (!response.ok) throw new Error('Failed to fetch listings');
+                            const data = await response.json();
+                            this.listings = (data.listings || []).slice(0, 6);
+                            
+                            setTimeout(() => {
+                                const observer = lozad();
+                                observer.observe();
+                            }, 100);
+                        } catch (err) {
+                            this.error = 'Failed to load listings. Please try again later.';
+                            console.error('Error fetching listings:', err);
+                        } finally {
+                            this.isLoading = false;
+                        }
+                    }
+                }" x-init="fetchListings()">
+                    <!-- Loading State -->
+                    <div x-show="isLoading" class="loading-spinner">
+                        <i class="fas fa-spinner fa-spin"></i> Loading listings...
+                    </div>
+                    
+                    <!-- Error State -->
+                    <div x-show="error" class="error-message" x-text="error"></div>
+                    
+                    <!-- Listings Grid -->
+                    <template x-for="listing in listings" :key="listing.id">
+                        <div class="listing-card" @click="showListingDetails(listing)">
+                            <div class="listing-image">
+                                <img 
+                                    class="lozad" 
+                                    :data-src="listing.image" 
+                                    :alt="listing.title"
+                                    @load="$el.classList.add('loaded')"
+                                    @error="console.error('Image failed to load:', $el.src); $el.src='static/images/placeholder.png'"
+                                >
+                                <div class="listing-condition" x-text="'Condition: ' + listing.condition + '/10'"></div>
+                            </div>
+                            <div class="listing-content">
+                                <h3 class="listing-title" x-text="listing.title"></h3>
+                                <div class="listing-price" x-text="'Rs. ' + listing.price"></div>
+                                <div class="listing-seller" x-text="'By ' + listing.seller_id"></div>
+                            </div>
+                        </div>
+                    </template>
+                    
+                    <!-- End of listings grid -->
+                </div>
+            </section>
+        </main>
+
+        <div id="footer"></div>
+
+    <!-- Listing Details Modal (moved inside main div) -->
+    <div class="modal" x-show="detailsModalOpen" @click.self="detailsModalOpen = false">
+        <div class="modal-content" x-show="selectedItem">
+            <span class="close-modal" @click="detailsModalOpen = false">&times;</span>
+            <div class="modal-body">
+                <div class="modal-image">
+                    <img :src="selectedItem?.image || 'https://via.placeholder.com/300x200?text=No+Image'" :alt="selectedItem?.title">
+                </div>
+                <div class="modal-details">
+                    <h2 x-text="selectedItem?.title"></h2>
+                    <p class="modal-price" x-text="'Rs. ' + selectedItem?.price"></p>
+                    <p class="modal-condition" x-text="'Condition: ' + selectedItem?.condition + '/10'"></p>
+                    <p class="modal-seller">
+                        <i class="fas fa-user"></i> <span x-text="selectedItem?.seller_id"></span>
+                    </p>
+                    <p class="modal-description" x-text="selectedItem?.description || 'No description available'"></p>
+                    <div class="modal-actions">
+                        <a class="btn btn-primary" :href="'listing.html?id=' + selectedItem?.id" target="_blank">
+                            <i class="fas fa-external-link-alt"></i> View Full Listing
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            // Initialize AOS
+            AOS.init({
+                duration: 800,
+                easing: 'ease-out',
+                once: true
+            });
+
+            // Initialize lozad
+            const observer = lozad();
+            observer.observe();
+        });
+    </script>
+    <script src="js/auth.js"></script>
+    <script src="js/toast.js"></script>
+    <script src="js/navbar.js"></script>
+    <script src="js/footer.js"></script>
+    <script src="js/main.js"></script>
+    <script src="js/index.js"></script>
+</body>
+</html>
